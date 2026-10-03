@@ -1,0 +1,6 @@
+{
+  "name": "LifeQuest 3D: Real Life & Banking Simulator",
+  "description": "An open world 3D life simulation game with survival needs, dynamic weather, bank account opening, virtual mobile banking app with interactive charts, SIM activation, and instant peer-to-peer transfers.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

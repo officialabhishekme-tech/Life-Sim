@@ -1,0 +1,111 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User character state, survival stats, and game progression",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Auth UID of the player" },
+        "displayName": { "type": "string", "description": "Character or Google account name" },
+        "email": { "type": "string", "description": "Player email" },
+        "gender": { "type": "string", "enum": ["male", "female"], "description": "Character gender male or female" },
+        "hunger": { "type": "number", "description": "Hunger level 0 to 100" },
+        "hydration": { "type": "number", "description": "Hydration level 0 to 100" },
+        "fatigue": { "type": "number", "description": "Fatigue level 0 to 100" },
+        "health": { "type": "number", "description": "Health level 0 to 100" },
+        "cashOnHand": { "type": "number", "description": "Physical cash in wallet" },
+        "questStage": { "type": "string", "description": "Current quest step" },
+        "gameDay": { "type": "number", "description": "Current simulation day" },
+        "gameHour": { "type": "number", "description": "Current simulation hour" },
+        "weather": { "type": "string", "description": "Current weather type" },
+        "updatedAt": { "type": "string", "description": "Timestamp string" }
+      },
+      "required": ["uid", "displayName", "hunger", "hydration", "fatigue", "health"]
+    },
+    "BankAccount": {
+      "title": "BankAccount",
+      "description": "User bank account details, customer ID and debit card",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Account owner UID" },
+        "customerId": { "type": "string", "description": "Unique banking customer ID" },
+        "accountNumber": { "type": "string", "description": "Bank account number" },
+        "balance": { "type": "number", "description": "Current account balance" },
+        "cardNumber": { "type": "string", "description": "Masked debit card number" },
+        "cardHolder": { "type": "string", "description": "Name printed on debit card" },
+        "expiryDate": { "type": "string", "description": "Card expiration MM/YY" },
+        "cvv": { "type": "string", "description": "Card security code" },
+        "isCardActive": { "type": "boolean", "description": "Whether card is unlocked" },
+        "createdAt": { "type": "string", "description": "Account creation timestamp" }
+      },
+      "required": ["userId", "customerId", "accountNumber", "balance", "cardNumber"]
+    },
+    "SimProfile": {
+      "title": "SimProfile",
+      "description": "Mobile SIM card and network activation state",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "SIM owner UID" },
+        "phoneNumber": { "type": "string", "description": "Assigned phone number" },
+        "carrier": { "type": "string", "description": "Telecom carrier name" },
+        "isActivated": { "type": "boolean", "description": "Activation state" },
+        "dataBalanceGb": { "type": "number", "description": "Available mobile data" },
+        "activatedAt": { "type": "string", "description": "Activation timestamp" }
+      },
+      "required": ["userId", "phoneNumber", "carrier", "isActivated"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Individual financial transaction log",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string", "description": "Transaction owner UID" },
+        "amount": { "type": "number", "description": "Transaction amount in USD" },
+        "type": { "type": "string", "description": "debit or credit" },
+        "category": { "type": "string", "description": "Spending category (Food, Water, Telecom, Transfer, Banking)" },
+        "description": { "type": "string", "description": "Merchant or transaction note" },
+        "recipient": { "type": "string", "description": "Recipient name or ID if P2P" },
+        "timestamp": { "type": "string", "description": "ISO timestamp" },
+        "balanceAfter": { "type": "number", "description": "Account balance after transaction" }
+      },
+      "required": ["userId", "amount", "type", "category", "description", "timestamp", "balanceAfter"]
+    },
+    "P2PTransfer": {
+      "title": "P2PTransfer",
+      "description": "Instant peer to peer money transfer message",
+      "type": "object",
+      "properties": {
+        "senderId": { "type": "string", "description": "Sender UID" },
+        "senderName": { "type": "string", "description": "Sender display name" },
+        "recipientTarget": { "type": "string", "description": "Target phone or Customer ID" },
+        "amount": { "type": "number", "description": "Sent amount" },
+        "note": { "type": "string", "description": "Transfer note" },
+        "timestamp": { "type": "string", "description": "ISO timestamp" },
+        "status": { "type": "string", "description": "Transfer status (completed, pending)" }
+      },
+      "required": ["senderId", "senderName", "recipientTarget", "amount", "timestamp", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Primary player state document"
+    },
+    "/users/{userId}/bankAccounts/{accountId}": {
+      "schema": "BankAccount",
+      "description": "Bank account record for user"
+    },
+    "/users/{userId}/simProfiles/{simId}": {
+      "schema": "SimProfile",
+      "description": "SIM and phone profile record"
+    },
+    "/users/{userId}/transactions/{transactionId}": {
+      "schema": "Transaction",
+      "description": "Transaction log entries for user"
+    },
+    "/p2pTransfers/{transferId}": {
+      "schema": "P2PTransfer",
+      "description": "Peer-to-peer transfer audit log"
+    }
+  }
+}
