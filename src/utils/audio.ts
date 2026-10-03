@@ -132,6 +132,50 @@ class SoundEngine {
     } catch {}
   }
 
+  playSlotSpin() {
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      [0, 0.07, 0.14, 0.21, 0.28].forEach((offset, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'square';
+        osc.frequency.setValueAtTime(540 + idx * 70, now + offset);
+        gain.gain.setValueAtTime(0.05, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.04);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.04);
+      });
+    } catch {}
+  }
+
+  playWinFanfare() {
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      const fanfare = [523.25, 659.25, 783.99, 1046.5, 1318.51];
+      fanfare.forEach((freq, idx) => {
+        if (!this.ctx) return;
+        const offset = idx * 0.09;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(freq, now + offset);
+        gain.gain.setValueAtTime(0.2, now + offset);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + offset + 0.5);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + offset);
+        osc.stop(now + offset + 0.5);
+      });
+    } catch {}
+  }
+
   playTransferSuccess() {
     try {
       this.init();
@@ -226,6 +270,51 @@ class SoundEngine {
         osc.start(now + offset);
         osc.stop(now + offset + 0.1);
       });
+    } catch {}
+  }
+
+  playVomit() {
+    try {
+      this.init();
+      if (!this.ctx) return;
+      const now = this.ctx.currentTime;
+      // Guttural gag / retching pulse 1
+      [0, 0.35, 0.7].forEach((delay, idx) => {
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        const startFreq = 160 - idx * 25;
+        osc.frequency.setValueAtTime(startFreq, now + delay);
+        osc.frequency.linearRampToValueAtTime(80, now + delay + 0.25);
+        gain.gain.setValueAtTime(0.22, now + delay);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + delay + 0.3);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now + delay);
+        osc.stop(now + delay + 0.3);
+      });
+
+      // Splashing liquid vomit noise
+      const bufferSize = this.ctx.sampleRate * 0.6;
+      const buffer = this.ctx.createBuffer(1, bufferSize, this.ctx.sampleRate);
+      const output = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        output[i] = (Math.random() * 2 - 1) * Math.exp(-i / (this.ctx.sampleRate * 0.2));
+      }
+      const whiteNoise = this.ctx.createBufferSource();
+      whiteNoise.buffer = buffer;
+      const filter = this.ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.setValueAtTime(650, now + 0.4);
+      filter.frequency.linearRampToValueAtTime(250, now + 0.9);
+      const splashGain = this.ctx.createGain();
+      splashGain.gain.setValueAtTime(0.18, now + 0.4);
+      splashGain.gain.exponentialRampToValueAtTime(0.001, now + 1.0);
+      whiteNoise.connect(filter);
+      filter.connect(splashGain);
+      splashGain.connect(this.ctx.destination);
+      whiteNoise.start(now + 0.4);
     } catch {}
   }
 }

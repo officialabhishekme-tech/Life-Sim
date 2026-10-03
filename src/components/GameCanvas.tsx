@@ -8,6 +8,7 @@ interface GameCanvasProps {
   weather: WeatherType;
   vitals: Vitals;
   gameHour: number;
+  isVomiting?: boolean;
   onNearZoneChange: (zone: InteractiveZone | null, distance: number | null) => void;
   onInteract: (zone: InteractiveZone) => void;
 }
@@ -48,6 +49,15 @@ export const INTERACTIVE_ZONES: InteractiveZone[] = [
     radius: 3.8,
     label: 'Restaurant Entrance Door',
     description: 'Dine in for gourmet chef meals, breakfast, lunch & dinner',
+  },
+  {
+    id: 'casino_studio',
+    name: 'Metropolis Royale Casino & Studio',
+    type: 'casino',
+    position: [-16.0, 0, 14],
+    radius: 3.8,
+    label: 'Casino & Gambling Studio Door',
+    description: 'Play Slots, Blackjack & Roulette! Bet and earn massive cash payouts',
   },
   {
     id: 'home_bed',
@@ -99,6 +109,9 @@ const BUILDING_COLLIDERS: BoxCollider[] = [
 
   // Player Apartment (Home): center [0, 22], size [14, 11, 10], north wall at Z = 17
   { minX: -7.0 - PLAYER_RADIUS, maxX: 7.0 + PLAYER_RADIUS, minZ: 17.0, maxZ: 27.0 + PLAYER_RADIUS },
+
+  // Metropolis Royale Casino & Gaming Studio: center [-22, 14], size [12, 8.5, 10], door on east wall at X = -16
+  { minX: -28.0 - PLAYER_RADIUS, maxX: -16.0, minZ: 9.0 - PLAYER_RADIUS, maxZ: 19.0 + PLAYER_RADIUS },
 ];
 
 const CIRCLE_COLLIDERS: CircleCollider[] = [
@@ -107,7 +120,7 @@ const CIRCLE_COLLIDERS: CircleCollider[] = [
 
   // Decorative City Trees trunks
   { x: -14, z: 6, radius: 0.45 + PLAYER_RADIUS },
-  { x: -16, z: 14, radius: 0.45 + PLAYER_RADIUS },
+  { x: -10, z: 22, radius: 0.45 + PLAYER_RADIUS },
   { x: -6, z: 14, radius: 0.45 + PLAYER_RADIUS },
   { x: 14, z: 6, radius: 0.45 + PLAYER_RADIUS },
   { x: 14, z: -4, radius: 0.45 + PLAYER_RADIUS },
@@ -147,11 +160,177 @@ function isWorldColliding(x: number, z: number): boolean {
   return false;
 }
 
+// Helper: Generates crisp, high-visibility 2D Canvas business sign textures
+function createSignboardTexture(
+  mainText: string,
+  subText: string,
+  icon: string,
+  opts?: {
+    bgColor?: string;
+    textColor?: string;
+    accentColor?: string;
+    subColor?: string;
+    glowColor?: string;
+    badgeBg?: string;
+  }
+): THREE.CanvasTexture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 1024;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const bgColor = opts?.bgColor || '#090d16';
+    const textColor = opts?.textColor || '#ffffff';
+    const accentColor = opts?.accentColor || '#f59e0b';
+    const subColor = opts?.subColor || '#94a3b8';
+    const glowColor = opts?.glowColor || accentColor;
+    const badgeBg = opts?.badgeBg || accentColor;
+
+    // Background Fill
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+    // Glowing Neon Border
+    ctx.lineWidth = 14;
+    ctx.strokeStyle = accentColor;
+    ctx.strokeRect(7, 7, canvas.width - 14, canvas.height - 14);
+
+    // Subtle inner border trim
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = glowColor;
+    ctx.strokeRect(20, 20, canvas.width - 40, canvas.height - 40);
+
+    // Icon Circle Badge
+    ctx.fillStyle = badgeBg;
+    ctx.beginPath();
+    ctx.arc(115, 128, 62, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.lineWidth = 4;
+    ctx.strokeStyle = '#ffffff';
+    ctx.stroke();
+
+    // Emoji icon
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 115, 130);
+
+    // Main Business Name Text
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+    ctx.fillStyle = textColor;
+    ctx.font = 'bold 52px system-ui, -apple-system, sans-serif';
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 10;
+    ctx.fillText(mainText, 205, 115);
+
+    // Subtitle / Business Category
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = subColor;
+    ctx.font = 'bold 23px system-ui, -apple-system, sans-serif';
+    ctx.fillText(subText, 208, 175);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+  return texture;
+}
+
+// Helper: Generates a 3D Marquee Signboard Mesh
+function createSignboardMesh(
+  width: number,
+  height: number,
+  texture: THREE.CanvasTexture,
+  frameColor: number = 0x1e293b,
+  emissiveIntensity: number = 0.65
+): THREE.Group {
+  const group = new THREE.Group();
+
+  const frameMat = new THREE.MeshStandardMaterial({
+    color: frameColor,
+    roughness: 0.4,
+    metalness: 0.7,
+  });
+  const frame = new THREE.Mesh(new THREE.BoxGeometry(width + 0.25, height + 0.25, 0.25), frameMat);
+  frame.castShadow = true;
+  group.add(frame);
+
+  const frontMat = new THREE.MeshStandardMaterial({
+    map: texture,
+    roughness: 0.2,
+    metalness: 0.1,
+    emissiveMap: texture,
+    emissive: 0xffffff,
+    emissiveIntensity: emissiveIntensity,
+  });
+  const frontFace = new THREE.Mesh(new THREE.PlaneGeometry(width, height), frontMat);
+  frontFace.position.z = 0.13;
+  group.add(frontFace);
+
+  return group;
+}
+
+// Helper: Generates a 3D Double-Sided Projecting Blade Sign on building corners
+function createBladeSign(
+  icon: string,
+  shortName: string,
+  accentColor: string,
+  bgColor: string = '#090d16'
+): THREE.Group {
+  const group = new THREE.Group();
+
+  const canvas = document.createElement('canvas');
+  canvas.width = 512;
+  canvas.height = 256;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = bgColor;
+    ctx.fillRect(0, 0, 512, 256);
+    ctx.lineWidth = 10;
+    ctx.strokeStyle = accentColor;
+    ctx.strokeRect(5, 5, 502, 246);
+
+    ctx.font = '64px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(icon, 100, 128);
+
+    ctx.fillStyle = '#ffffff';
+    ctx.font = 'bold 46px system-ui, -apple-system, sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(shortName, 175, 142);
+  }
+
+  const texture = new THREE.CanvasTexture(canvas);
+  texture.colorSpace = THREE.SRGBColorSpace;
+
+  const mat = new THREE.MeshStandardMaterial({
+    map: texture,
+    emissiveMap: texture,
+    emissive: 0xffffff,
+    emissiveIntensity: 0.6,
+    roughness: 0.3,
+  });
+
+  const signMesh = new THREE.Mesh(new THREE.BoxGeometry(2.6, 1.3, 0.12), mat);
+  group.add(signMesh);
+
+  const bracketMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, metalness: 0.85 });
+  const arm = new THREE.Mesh(new THREE.CylinderGeometry(0.04, 0.04, 2.8, 8), bracketMat);
+  arm.rotation.z = Math.PI / 2;
+  arm.position.set(-0.1, 0.7, 0);
+  group.add(arm);
+
+  return group;
+}
+
 export const GameCanvas: React.FC<GameCanvasProps> = ({
   gender,
   weather,
   vitals,
   gameHour,
+  isVomiting = false,
   onNearZoneChange,
   onInteract,
 }) => {
@@ -164,6 +343,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   const weatherRef = useRef(weather);
   const vitalsRef = useRef(vitals);
   const gameHourRef = useRef(gameHour);
+  const isVomitingRef = useRef(isVomiting);
   const onNearZoneChangeRef = useRef(onNearZoneChange);
   const onInteractRef = useRef(onInteract);
 
@@ -182,6 +362,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
   useEffect(() => {
     gameHourRef.current = gameHour;
   }, [gameHour]);
+
+  useEffect(() => {
+    isVomitingRef.current = isVomiting;
+  }, [isVomiting]);
 
   useEffect(() => {
     onNearZoneChangeRef.current = onNearZoneChange;
@@ -318,17 +502,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       bankGroup.add(pillar);
     }
 
-    // Bank Glowing Signboard
-    const bankSign = new THREE.Mesh(
-      new THREE.BoxGeometry(10, 1.2, 0.3),
-      new THREE.MeshStandardMaterial({
-        color: 0xd97706,
-        emissive: 0xb45309,
-        emissiveIntensity: 0.6,
-      })
+    // Bank Marquee Board & Projecting Blade Sign
+    const bankTexture = createSignboardTexture(
+      'BANK OF METROPOLIS',
+      'NATIONAL FINANCIAL DISTRICT • CHECKING & DEBIT',
+      '🏛️',
+      { accentColor: '#f59e0b', bgColor: '#090d16', glowColor: '#fbbf24', badgeBg: '#d97706' }
     );
-    bankSign.position.set(0, 7.8, 5.2);
-    bankGroup.add(bankSign);
+    const bankBoard = createSignboardMesh(10.5, 1.6, bankTexture, 0x1e293b, 0.75);
+    bankBoard.position.set(0, 7.8, 5.25);
+    bankGroup.add(bankBoard);
+
+    const bankBlade = createBladeSign('🏛️', 'METRO BANK', '#f59e0b', '#090d16');
+    bankBlade.position.set(-6.5, 4.2, 5.2);
+    bankBlade.rotation.y = Math.PI / 2;
+    bankGroup.add(bankBlade);
+
     buildingsGroup.add(bankGroup);
 
     // NOVA TELECOM (East: [24, 0, -10])
@@ -350,18 +539,22 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     tower.position.set(0, 13.5, 0);
     simGroup.add(tower);
 
-    // Neon signage
-    const simSign = new THREE.Mesh(
-      new THREE.BoxGeometry(8, 1.5, 0.3),
-      new THREE.MeshStandardMaterial({
-        color: 0x9333ea,
-        emissive: 0x7e22ce,
-        emissiveIntensity: 0.9,
-      })
+    // Nova Telecom Marquee Board & Projecting Blade Sign
+    const simTexture = createSignboardTexture(
+      'NOVA TELECOM 5G',
+      'HIGH SPEED DATA • SIM ACTIVATION & MOBILE PAY',
+      '📱',
+      { accentColor: '#a855f7', bgColor: '#1e1b4b', glowColor: '#c084fc', badgeBg: '#7c3aed' }
     );
-    simSign.position.set(-5.2, 6, 0);
-    simSign.rotation.y = Math.PI / 2;
-    simGroup.add(simSign);
+    const simBoard = createSignboardMesh(9.4, 1.6, simTexture, 0x1e1b4b, 0.8);
+    simBoard.position.set(-6.15, 6.2, 0);
+    simBoard.rotation.y = -Math.PI / 2;
+    simGroup.add(simBoard);
+
+    const simBlade = createBladeSign('📱', 'NOVA 5G', '#a855f7', '#1e1b4b');
+    simBlade.position.set(-6.15, 4.2, 4.2);
+    simGroup.add(simBlade);
+
     buildingsGroup.add(simGroup);
 
     // METRO MARKET & CAFE (West: [-24, 0, -10])
@@ -384,6 +577,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     awning.rotation.y = Math.PI / 2;
     awning.rotation.z = -0.2;
     marketGroup.add(awning);
+
+    // Metro Market Marquee Board & Projecting Blade Sign
+    const marketTexture = createSignboardTexture(
+      'METRO MARKET & CAFE',
+      'FRESH GROCERIES • HOT MEALS • COLD DRINKS',
+      '🛒',
+      { accentColor: '#10b981', bgColor: '#064e3b', glowColor: '#34d399', badgeBg: '#059669' }
+    );
+    const marketBoard = createSignboardMesh(9.5, 1.6, marketTexture, 0x064e3b, 0.8);
+    marketBoard.position.set(6.15, 5.8, 0);
+    marketBoard.rotation.y = Math.PI / 2;
+    marketGroup.add(marketBoard);
+
+    const marketBlade = createBladeSign('🛒', 'MARKET', '#10b981', '#064e3b');
+    marketBlade.position.set(6.15, 4.2, 4.2);
+    marketGroup.add(marketBlade);
+
     buildingsGroup.add(marketGroup);
 
     // PLAYER APARTMENT (South: [0, 0, 22])
@@ -404,6 +614,24 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     );
     door.position.set(0, 1.75, -5.1);
     homeGroup.add(door);
+
+    // Metro Lofts Residence Marquee Board & Blade Sign
+    const homeTexture = createSignboardTexture(
+      'METRO LOFTS RESIDENCE',
+      'CITIZEN APARTMENTS • BEDROOM & SLEEP RETREAT',
+      '🏠',
+      { accentColor: '#6366f1', bgColor: '#0f172a', glowColor: '#818cf8', badgeBg: '#4f46e5' }
+    );
+    const homeBoard = createSignboardMesh(9.5, 1.6, homeTexture, 0x1e293b, 0.7);
+    homeBoard.position.set(0, 5.6, -5.15);
+    homeBoard.rotation.y = Math.PI;
+    homeGroup.add(homeBoard);
+
+    const homeBlade = createBladeSign('🏠', 'LOFTS', '#6366f1', '#0f172a');
+    homeBlade.position.set(-5.5, 4.2, -5.15);
+    homeBlade.rotation.y = Math.PI / 2;
+    homeGroup.add(homeBlade);
+
     buildingsGroup.add(homeGroup);
 
     // BELLA VISTA RESTAURANT & BISTRO (East Plaza: [22, 0, 12])
@@ -427,18 +655,21 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     restAwning.rotation.z = 0.2;
     restaurantGroup.add(restAwning);
 
-    // Glowing Sign: BELLA VISTA BISTRO
-    const restSign = new THREE.Mesh(
-      new THREE.BoxGeometry(9, 1.4, 0.3),
-      new THREE.MeshStandardMaterial({
-        color: 0xf59e0b,
-        emissive: 0xd97706,
-        emissiveIntensity: 0.85,
-      })
+    // Bella Vista Bistro Marquee Board & Blade Sign
+    const restTexture = createSignboardTexture(
+      'BELLA VISTA BISTRO',
+      'AUTHENTIC ITALIAN FINE DINING & PATIO',
+      '🍝',
+      { accentColor: '#f59e0b', bgColor: '#450a0a', glowColor: '#fbbf24', badgeBg: '#b91c1c' }
     );
-    restSign.position.set(-6.2, 5.8, 0);
-    restSign.rotation.y = Math.PI / 2;
-    restaurantGroup.add(restSign);
+    const restBoard = createSignboardMesh(9.5, 1.6, restTexture, 0x450a0a, 0.8);
+    restBoard.position.set(-6.15, 6.0, 0);
+    restBoard.rotation.y = -Math.PI / 2;
+    restaurantGroup.add(restBoard);
+
+    const restBlade = createBladeSign('🍝', 'BISTRO', '#f59e0b', '#450a0a');
+    restBlade.position.set(-6.15, 4.2, -4.2);
+    restaurantGroup.add(restBlade);
 
     // Outdoor Terrace Dining Table & Chairs
     const tableMesh = new THREE.Mesh(
@@ -464,6 +695,89 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     restaurantGroup.add(umbrella);
 
     buildingsGroup.add(restaurantGroup);
+
+    // METROPOLIS ROYALE CASINO & GAMING STUDIO (South-West: [-22, 0, 14])
+    const casinoGroup = new THREE.Group();
+    casinoGroup.position.set(-22, 0, 14);
+
+    // Main casino structure (Luxury Obsidian Black & Gold)
+    const casinoMat = new THREE.MeshStandardMaterial({
+      color: 0x090d16,
+      roughness: 0.35,
+      metalness: 0.45,
+    });
+    const casinoMesh = new THREE.Mesh(new THREE.BoxGeometry(12, 8.5, 10), casinoMat);
+    casinoMesh.position.y = 4.25;
+    casinoMesh.castShadow = true;
+    casinoMesh.receiveShadow = true;
+    casinoGroup.add(casinoMesh);
+
+    // Gold Trim & Cornice Columns
+    const goldMat = new THREE.MeshStandardMaterial({
+      color: 0xf59e0b,
+      metalness: 0.85,
+      roughness: 0.25,
+      emissive: 0xd97706,
+      emissiveIntensity: 0.15,
+    });
+    const goldRoofTrim = new THREE.Mesh(new THREE.BoxGeometry(12.4, 0.5, 10.4), goldMat);
+    goldRoofTrim.position.y = 8.5;
+    casinoGroup.add(goldRoofTrim);
+
+    // Decorative Gold Pilasters
+    [-4.5, 4.5].forEach((offsetZ) => {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.35, 0.4, 8.5, 12), goldMat);
+      pillar.position.set(6.05, 4.25, offsetZ);
+      casinoGroup.add(pillar);
+    });
+
+    // Casino Canopy / Marquee
+    const casinoCanopy = new THREE.Mesh(
+      new THREE.BoxGeometry(11, 0.5, 3.2),
+      new THREE.MeshStandardMaterial({ color: 0x1e1b4b, roughness: 0.3 })
+    );
+    casinoCanopy.position.set(6.1, 4.3, 0);
+    casinoCanopy.rotation.y = Math.PI / 2;
+    casinoGroup.add(casinoCanopy);
+
+    // Glowing Neon Marquee Board: ROYALE CASINO & GAMING STUDIO
+    const casinoTexture = createSignboardTexture(
+      'ROYALE CASINO & STUDIO',
+      'VIP HIGH ROLLER • SLOTS, BLACKJACK & ROULETTE',
+      '🎰',
+      { accentColor: '#facc15', bgColor: '#090d16', glowColor: '#eab308', badgeBg: '#d97706' }
+    );
+    const casinoBoard = createSignboardMesh(10.2, 1.8, casinoTexture, 0x090d16, 0.85);
+    casinoBoard.position.set(6.15, 6.0, 0);
+    casinoBoard.rotation.y = Math.PI / 2;
+    casinoGroup.add(casinoBoard);
+
+    const casinoBlade = createBladeSign('🎰', 'CASINO VIP', '#facc15', '#090d16');
+    casinoBlade.position.set(6.15, 4.2, -4.2);
+    casinoGroup.add(casinoBlade);
+
+    // Giant 3D Golden Dice on the Roof
+    const diceMat = new THREE.MeshStandardMaterial({
+      color: 0xfef08a,
+      metalness: 0.85,
+      roughness: 0.2,
+      emissive: 0xf59e0b,
+      emissiveIntensity: 0.4,
+    });
+    const casinoDice = new THREE.Mesh(new THREE.BoxGeometry(2.2, 2.2, 2.2), diceMat);
+    casinoDice.position.set(0, 10.2, 0);
+    casinoDice.rotation.set(0.4, 0.6, 0.2);
+    casinoGroup.add(casinoDice);
+
+    // Red Carpet Entrance
+    const redCarpet = new THREE.Mesh(
+      new THREE.BoxGeometry(3.5, 0.04, 2.2),
+      new THREE.MeshStandardMaterial({ color: 0xb91c1c, roughness: 0.9 })
+    );
+    redCarpet.position.set(6.2, 0.02, 0);
+    casinoGroup.add(redCarpet);
+
+    buildingsGroup.add(casinoGroup);
 
     // PUBLIC WATER FOUNTAIN (Park: [-10, 0, 10])
     const fountainGroup = new THREE.Group();
@@ -494,12 +808,25 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     );
     fountainCenter.position.y = 1.1;
     fountainGroup.add(fountainCenter);
+
+    // Fountain Identification Plaque
+    const fountainTexture = createSignboardTexture(
+      'CENTRAL WATER FOUNTAIN',
+      'FREE CLEAN DRINKING WATER • HYDRATE & REFRESH',
+      '💧',
+      { accentColor: '#38bdf8', bgColor: '#082f49', glowColor: '#7dd3fc', badgeBg: '#0284c7' }
+    );
+    const fountainBoard = createSignboardMesh(3.4, 0.9, fountainTexture, 0x0f172a, 0.8);
+    fountainBoard.position.set(0, 1.2, 2.9);
+    fountainBoard.rotation.x = -0.3;
+    fountainGroup.add(fountainBoard);
+
     buildingsGroup.add(fountainGroup);
 
     // Decorative City Trees
     const treePositions = [
       [-14, 0, 6],
-      [-16, 0, 14],
+      [-10, 0, 22],
       [-6, 0, 14],
       [14, 0, 6],
       [14, 0, -4],
@@ -571,10 +898,23 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     INTERACTIVE_ZONES.forEach((zone) => {
       const ringGeo = new THREE.RingGeometry(zone.radius * 0.7, zone.radius * 0.85, 32);
       const ringMat = new THREE.MeshBasicMaterial({
-        color: zone.type === 'bank' ? 0xf59e0b : zone.type === 'sim' ? 0xa855f7 : zone.type === 'market' ? 0x10b981 : zone.type === 'home' ? 0x6366f1 : 0x06b6d4,
+        color:
+          zone.type === 'bank'
+            ? 0xf59e0b
+            : zone.type === 'sim'
+            ? 0xa855f7
+            : zone.type === 'market'
+            ? 0x10b981
+            : zone.type === 'restaurant'
+            ? 0xe11d48
+            : zone.type === 'casino'
+            ? 0xfacc15
+            : zone.type === 'home'
+            ? 0x6366f1
+            : 0x06b6d4,
         side: THREE.DoubleSide,
         transparent: true,
-        opacity: 0.6,
+        opacity: 0.65,
       });
       const ring = new THREE.Mesh(ringGeo, ringMat);
       ring.rotation.x = -Math.PI / 2;
@@ -602,6 +942,27 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
     const rainSystem = new THREE.Points(rainGeo, rainMat);
     rainSystem.visible = false;
     scene.add(rainSystem);
+
+    // 6b. Vomit Particle System (spews bile droplets when overeating / vomiting)
+    const vomitCount = 50;
+    const vomitGeo = new THREE.BufferGeometry();
+    const vomitPositions = new Float32Array(vomitCount * 3);
+    const vomitVelocities: THREE.Vector3[] = [];
+    for (let i = 0; i < vomitCount; i++) {
+      vomitPositions[i * 3] = 0;
+      vomitPositions[i * 3 + 1] = -100; // start hidden underground
+      vomitPositions[i * 3 + 2] = 0;
+      vomitVelocities.push(new THREE.Vector3(0, 0, 0));
+    }
+    vomitGeo.setAttribute('position', new THREE.BufferAttribute(vomitPositions, 3));
+    const vomitMat = new THREE.PointsMaterial({
+      color: 0xa3e635, // acidic lime-yellow bile
+      size: 0.22,
+      transparent: true,
+      opacity: 0.95,
+    });
+    const vomitParticles = new THREE.Points(vomitGeo, vomitMat);
+    scene.add(vomitParticles);
 
     // 7. Rigged 3D Character Model (Avatar with animated legs & arms)
     const characterGroup = new THREE.Group();
@@ -793,6 +1154,10 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       const currentWeather = weatherRef.current;
       const currentGameHour = gameHourRef.current;
 
+      // Rotate decorative casino golden dice
+      casinoDice.rotation.y += delta * 0.8;
+      casinoDice.rotation.x += delta * 0.4;
+
       // Read movement input
       let moveX = 0;
       let moveZ = 0;
@@ -803,7 +1168,34 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       if (keys['a'] || keys['arrowleft']) moveX -= 1;
       if (keys['d'] || keys['arrowright']) moveX += 1;
 
+      // Stop movement during vomiting episode
+      const isCurrentlyVomiting = isVomitingRef.current;
+      if (isCurrentlyVomiting) {
+        moveX = 0;
+        moveZ = 0;
+      }
+
       const currentVitals = vitalsRef.current;
+      // Dynamic Physique: When not eating properly, character becomes visibly lean/gaunt!
+      const weight = currentVitals.weightKg !== undefined ? currentVitals.weightKg : (currentVitals.hunger < 35 ? 49 : 70);
+      // Normalized thickness factor: 70kg = 1.0 (fit athletic build), 48kg = 0.58 (gaunt, skinny lean physique)
+      const targetThickness = THREE.MathUtils.clamp(weight / 70, 0.58, 1.18);
+      const limbThickness = targetThickness * 0.88;
+
+      torso.scale.x = THREE.MathUtils.lerp(torso.scale.x, targetThickness, 4 * delta);
+      torso.scale.z = THREE.MathUtils.lerp(torso.scale.z, targetThickness, 4 * delta);
+      leftArm.scale.x = THREE.MathUtils.lerp(leftArm.scale.x, limbThickness, 4 * delta);
+      leftArm.scale.z = THREE.MathUtils.lerp(leftArm.scale.z, limbThickness, 4 * delta);
+      rightArm.scale.x = THREE.MathUtils.lerp(rightArm.scale.x, limbThickness, 4 * delta);
+      rightArm.scale.z = THREE.MathUtils.lerp(rightArm.scale.z, limbThickness, 4 * delta);
+      leftLeg.scale.x = THREE.MathUtils.lerp(leftLeg.scale.x, targetThickness * 0.92, 4 * delta);
+      leftLeg.scale.z = THREE.MathUtils.lerp(leftLeg.scale.z, targetThickness * 0.92, 4 * delta);
+      rightLeg.scale.x = THREE.MathUtils.lerp(rightLeg.scale.x, targetThickness * 0.92, 4 * delta);
+      rightLeg.scale.z = THREE.MathUtils.lerp(rightLeg.scale.z, targetThickness * 0.92, 4 * delta);
+      backpack.scale.x = THREE.MathUtils.lerp(backpack.scale.x, targetThickness, 4 * delta);
+      leftArmPivot.position.x = 0.55 * targetThickness;
+      rightArmPivot.position.x = -0.55 * targetThickness;
+
       // Sprinting blocked if severely dehydrated or exhausted or starved
       const canSprint = currentVitals.stamina > 5 && currentVitals.hydration > 15 && currentVitals.hunger > 15 && currentVitals.fatigue > 15;
       const isSprinting = !!keys['shift'] && canSprint;
@@ -882,6 +1274,55 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({
       }
 
       characterGroup.position.copy(playerState.current.pos);
+
+      // 8b. Vomiting Animation Pose & Particle Physics
+      if (isCurrentlyVomiting) {
+        // Bend character over retching
+        torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0.72, 12 * delta);
+        head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0.5, 12 * delta);
+        leftArmPivot.rotation.x = THREE.MathUtils.lerp(leftArmPivot.rotation.x, 0.35, 10 * delta);
+        rightArmPivot.rotation.x = THREE.MathUtils.lerp(rightArmPivot.rotation.x, 0.35, 10 * delta);
+        // Convulsive retching shudder
+        characterGroup.position.y = playerState.current.pos.y + Math.sin(clock.getElapsedTime() * 32) * 0.04;
+
+        // Spew vomit bile particles from mouth area forward and down
+        const vomitPosArr = vomitGeo.attributes.position.array as Float32Array;
+        const forwardX = Math.sin(characterGroup.rotation.y);
+        const forwardZ = Math.cos(characterGroup.rotation.y);
+        const mouthX = playerState.current.pos.x + forwardX * 0.45;
+        const mouthY = playerState.current.pos.y + 1.85;
+        const mouthZ = playerState.current.pos.z + forwardZ * 0.45;
+
+        for (let i = 0; i < vomitCount; i++) {
+          const idx = i * 3;
+          if (vomitPosArr[idx + 1] <= 0.05) {
+            vomitPosArr[idx] = mouthX + (Math.random() - 0.5) * 0.12;
+            vomitPosArr[idx + 1] = mouthY + (Math.random() - 0.5) * 0.1;
+            vomitPosArr[idx + 2] = mouthZ + (Math.random() - 0.5) * 0.12;
+            vomitVelocities[i].set(
+              forwardX * (2.8 + Math.random() * 2.2) + (Math.random() - 0.5) * 0.9,
+              0.8 + Math.random() * 1.0,
+              forwardZ * (2.8 + Math.random() * 2.2) + (Math.random() - 0.5) * 0.9
+            );
+          } else {
+            vomitVelocities[i].y -= 10.5 * delta;
+            vomitPosArr[idx] += vomitVelocities[i].x * delta;
+            vomitPosArr[idx + 1] += vomitVelocities[i].y * delta;
+            vomitPosArr[idx + 2] += vomitVelocities[i].z * delta;
+          }
+        }
+        vomitGeo.attributes.position.needsUpdate = true;
+      } else {
+        // Return from vomit retch pose
+        torso.rotation.x = THREE.MathUtils.lerp(torso.rotation.x, 0, 8 * delta);
+        head.rotation.x = THREE.MathUtils.lerp(head.rotation.x, 0, 8 * delta);
+        // Hide vomit particles underground
+        const vomitPosArr = vomitGeo.attributes.position.array as Float32Array;
+        for (let i = 0; i < vomitCount; i++) {
+          vomitPosArr[i * 3 + 1] = -100;
+        }
+        vomitGeo.attributes.position.needsUpdate = true;
+      }
 
       // Third-person smooth follow camera
       const camDist = cameraAngle.current.distance;

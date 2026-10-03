@@ -26,16 +26,17 @@ import {
   InteractiveZone,
   InventoryItem,
   CharacterGender,
-  PhysicalAffliction
+  PhysicalAffliction,
+  SmsMessage
 } from './types/game';
 import { AuthScreen } from './components/AuthScreen';
 import { CharacterSelectModal } from './components/CharacterSelectModal';
 import { GameCanvas } from './components/GameCanvas';
 import { HUD } from './components/HUD';
-import { MobileApp } from './components/MobileApp';
+import { MobileApp, DEFAULT_SMS } from './components/MobileApp';
 import { InteractionModal } from './components/InteractionModal';
 import { sounds } from './utils/audio';
-import { LogOut, Volume2, VolumeX, Smartphone, Heart } from 'lucide-react';
+import { LogOut, Volume2, VolumeX, Smartphone, Heart, CreditCard, DollarSign, X } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState<User | null>(null);
@@ -57,9 +58,13 @@ export default function App() {
     fatigue: 85,
     health: 95,
     stamina: 100,
+    weightKg: 70, // 70kg baseline normal athletic weight
+    stomachFullness: 75,
   });
   const [cashOnHand, setCashOnHand] = useState(50.0);
   const [isVitalsMinimized, setIsVitalsMinimized] = useState(false);
+  const [isVomiting, setIsVomiting] = useState(false);
+  const [vomitAlert, setVomitAlert] = useState<string | null>(null);
 
   // Quest Progression
   const [questStage, setQuestStage] = useState<QuestStage>('GO_TO_BANK');
@@ -75,6 +80,85 @@ export default function App() {
   const [nearestZoneDistance, setNearestZoneDistance] = useState<number | null>(null);
   const [nearestZoneName, setNearestZoneName] = useState<string | null>(null);
   const [clinicAlert, setClinicAlert] = useState<string | null>(null);
+
+  // SMS & Real-time Debit Alerts
+  const [messages, setMessages] = useState<SmsMessage[]>(DEFAULT_SMS);
+  const [debitNotification, setDebitNotification] = useState<{
+    id: string;
+    amount: number;
+    merchant: string;
+    balanceAfter: number;
+    type: 'debit' | 'credit';
+  } | null>(null);
+
+  // Real-time Debit Notification & Bank SMS Dispatcher
+  const triggerDebitAlert = (amount: number, merchant: string, newBalance: number) => {
+    setDebitNotification({
+      id: `deb_${Date.now()}`,
+      amount,
+      merchant,
+      balanceAfter: newBalance,
+      type: 'debit',
+    });
+    sounds.playNotification();
+
+    const hourInt = Math.floor(gameHour) % 24;
+    const minuteInt = Math.floor((gameHour % 1) * 60);
+    const isPm = hourInt >= 12;
+    const displayHour = hourInt % 12 === 0 ? 12 : hourInt % 12;
+    const timeStr = `${displayHour.toString().padStart(2, '0')}:${minuteInt.toString().padStart(2, '0')} ${isPm ? 'PM' : 'AM'}`;
+
+    const cardLast4 = bankAccount?.cardNumber ? bankAccount.cardNumber.slice(-4) : '4821';
+    const debitSms: SmsMessage = {
+      id: `sms_debit_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      senderName: 'Bank of Metropolis',
+      senderPhone: '4091-METRO',
+      body: `Debit Alert: $${amount.toFixed(2)} charged to Visa Card ending in ${cardLast4} at ${merchant} (Day ${gameDay}, ${timeStr}). Available Balance: $${newBalance.toFixed(2)}.`,
+      timestamp: `Day ${gameDay}, ${timeStr}`,
+      isRead: false,
+      avatarBg: 'bg-amber-500',
+    };
+
+    setMessages((prev) => [debitSms, ...prev]);
+
+    setTimeout(() => {
+      setDebitNotification((current) => (current?.amount === amount ? null : current));
+    }, 4500);
+  };
+
+  // Real-time Credit Notification & Bank SMS Dispatcher
+  const triggerCreditAlert = (amount: number, source: string, newBalance: number) => {
+    setDebitNotification({
+      id: `crd_${Date.now()}`,
+      amount,
+      merchant: source,
+      balanceAfter: newBalance,
+      type: 'credit',
+    });
+    sounds.playCashChime();
+
+    const hourInt = Math.floor(gameHour) % 24;
+    const minuteInt = Math.floor((gameHour % 1) * 60);
+    const isPm = hourInt >= 12;
+    const displayHour = hourInt % 12 === 0 ? 12 : hourInt % 12;
+    const timeStr = `${displayHour.toString().padStart(2, '0')}:${minuteInt.toString().padStart(2, '0')} ${isPm ? 'PM' : 'AM'}`;
+
+    const creditSms: SmsMessage = {
+      id: `sms_credit_${Date.now()}_${Math.floor(Math.random() * 1000)}`,
+      senderName: 'Bank of Metropolis',
+      senderPhone: '4091-METRO',
+      body: `Credit Alert: $${amount.toFixed(2)} credited to your checking account from ${source} (Day ${gameDay}, ${timeStr}). Available Balance: $${newBalance.toFixed(2)}.`,
+      timestamp: `Day ${gameDay}, ${timeStr}`,
+      isRead: false,
+      avatarBg: 'bg-emerald-500',
+    };
+
+    setMessages((prev) => [creditSms, ...prev]);
+
+    setTimeout(() => {
+      setDebitNotification((current) => (current?.amount === amount ? null : current));
+    }, 4500);
+  };
 
   // Real-time calculation of physical problems from vitals
   const afflictions = useMemo<PhysicalAffliction[]>(() => {
@@ -148,8 +232,32 @@ export default function App() {
       });
     }
 
+    // 5. Malnutrition & Lean Gaunt Physique
+    if (vitals.weightKg < 56 || vitals.hunger < 25) {
+      list.push({
+        id: 'severe_malnutrition_lean',
+        title: 'Gaunt / Emaciated Lean Physique',
+        severity: 'severe',
+        impactDescription: 'Character is visibly skinny and lean due to inadequate food intake. Low physical mass.',
+        cureRecommendation: 'Dine thrice a day at Bella Vista Bistro to rebuild healthy body weight and muscle.',
+      });
+    }
+
+    // 6. Overeating / Vomiting
+    if (isVomiting || (vitals.stomachFullness && vitals.stomachFullness > 100)) {
+      list.push({
+        id: 'overeating_vomit',
+        title: isVomiting ? 'Active Vomiting Episode' : 'Overstuffed Stomach & Nausea',
+        severity: isVomiting ? 'critical' : 'severe',
+        impactDescription: isVomiting
+          ? 'Violently retching and vomiting from eating too much food! Rapid dehydration and exhaustion.'
+          : 'Stomach is at maximum capacity (>100%). Any more food will cause you to vomit!',
+        cureRecommendation: 'Stop eating immediately. Sip cool water once nausea subsides.',
+      });
+    }
+
     return list;
-  }, [vitals]);
+  }, [vitals, isVomiting]);
 
   // 1. Firebase Auth State Listener
   useEffect(() => {
@@ -347,6 +455,27 @@ export default function App() {
         }
         let newHealth = Math.min(100, Math.max(0, prev.health + healthDelta));
 
+        // Dynamic Weight & Leanness Simulation:
+        // If hunger is low (< 35) or starved, body burns reserves and becomes lean & gaunt!
+        let weightDelta = 0;
+        if (newHunger < 20) {
+          weightDelta = -0.06; // Rapid loss of weight & muscle mass
+        } else if (newHunger < 40) {
+          weightDelta = -0.02; // Becoming lean from not eating properly
+        } else if (newHunger >= 60 && newHunger <= 85) {
+          // Normalize towards healthy athletic weight 70kg
+          if ((prev.weightKg || 70) < 70) weightDelta = 0.02;
+          else if ((prev.weightKg || 70) > 72) weightDelta = -0.01;
+        } else if (newHunger > 90) {
+          weightDelta = 0.03; // Gaining weight when consistently overfed
+        }
+        const currentW = prev.weightKg !== undefined ? prev.weightKg : 70;
+        const newWeight = Math.min(88, Math.max(48, currentW + weightDelta));
+
+        // Digestion of stomach fullness towards hunger
+        const currentFullness = prev.stomachFullness !== undefined ? prev.stomachFullness : prev.hunger;
+        const newFullness = Math.max(0, currentFullness - 0.12);
+
         // Critical Collapse: If health reaches 0, trigger clinic emergency resuscitation
         if (newHealth <= 0) {
           sounds.playNotification();
@@ -360,6 +489,8 @@ export default function App() {
             fatigue: 60,
             health: 65,
             stamina: 80,
+            weightKg: Math.max(55, currentW),
+            stomachFullness: 50,
           };
         }
 
@@ -372,6 +503,8 @@ export default function App() {
           fatigue: newFatigue,
           health: newHealth,
           stamina: newStamina,
+          weightKg: newWeight,
+          stomachFullness: newFullness,
         };
       });
     }, 1000);
@@ -517,6 +650,9 @@ export default function App() {
         setQuestStage('SURVIVE_AND_THRIVE');
       }
 
+      // Trigger real-time on-screen notification & SMS message as debited!
+      triggerDebitAlert(amount, `P2P to ${recipient}`, newBalance);
+
       return true;
     } catch (err) {
       handleFirestoreError(err, OperationType.WRITE, `users/${uid}/transactions`);
@@ -551,6 +687,9 @@ export default function App() {
           timestamp: new Date().toISOString(),
           balanceAfter: newBalance,
         });
+
+        // Trigger real-time on-screen notification & debited SMS message!
+        triggerDebitAlert(item.cost, item.name, newBalance);
       } catch (err) {
         handleFirestoreError(err, OperationType.WRITE, `users/${uid}/bankAccounts/main`);
         return false;
@@ -558,24 +697,70 @@ export default function App() {
     } else {
       if (cashOnHand < item.cost) return false;
       setCashOnHand((prev) => prev - item.cost);
+      sounds.playNotification();
+    }
+
+    // Check for Overeating / Emesis Vomiting
+    const isFoodItem = item.type === 'food' || item.hungerValue > 0;
+    const currentFullness = vitals.stomachFullness !== undefined ? vitals.stomachFullness : vitals.hunger;
+    const willOvereat = isFoodItem && (currentFullness + item.hungerValue > 115 || vitals.hunger >= 96);
+
+    if (willOvereat) {
+      // Violent Emesis episode
+      setIsVomiting(true);
+      sounds.playVomit();
+      setVomitAlert(
+        "🤢 Emesis / Overeating Warning: You ate too much food! Your stomach was completely overstuffed and rejected the food. Character is violently retching and vomiting. Rehydrate with water immediately!"
+      );
+
+      setTimeout(() => {
+        setIsVomiting(false);
+      }, 5000);
+
+      // Expel stomach contents with harsh dehydration and fatigue penalty
+      setVitals((prev) => ({
+        ...prev,
+        stomachFullness: 15,
+        hunger: 25, // expelled food
+        hydration: Math.max(10, prev.hydration - 35), // rapid dehydration
+        fatigue: Math.max(10, prev.fatigue - 20), // visceral exhaustion
+        health: Math.max(15, prev.health - 12),
+      }));
+
+      return true;
     }
 
     // Apply immediate nutritional benefits to vitals
-    setVitals((prev) => ({
-      ...prev,
-      hunger: Math.min(100, prev.hunger + item.hungerValue),
-      hydration: Math.min(100, prev.hydration + item.hydrationValue),
-      fatigue: Math.min(100, prev.fatigue + item.energyValue),
-      health: Math.min(
-        100,
-        prev.health +
-          (item.healthValue !== undefined
-            ? item.healthValue
-            : item.hungerValue > 40
-            ? 15
-            : 5)
-      ),
-    }));
+    setVitals((prev) => {
+      const nextHunger = Math.min(100, prev.hunger + item.hungerValue);
+      const nextHydration = Math.min(100, prev.hydration + item.hydrationValue);
+      const nextFatigue = Math.min(100, prev.fatigue + item.energyValue);
+      const nextFullness = Math.min(115, (prev.stomachFullness || prev.hunger) + item.hungerValue);
+
+      // Good nutritious eating gradually restores lean gaunt body towards healthy 70kg
+      let currentW = prev.weightKg !== undefined ? prev.weightKg : 70;
+      if (item.hungerValue > 20 && currentW < 70) {
+        currentW = Math.min(70, currentW + 0.6);
+      }
+
+      return {
+        ...prev,
+        hunger: nextHunger,
+        hydration: nextHydration,
+        fatigue: nextFatigue,
+        stomachFullness: nextFullness,
+        weightKg: currentW,
+        health: Math.min(
+          100,
+          prev.health +
+            (item.healthValue !== undefined
+              ? item.healthValue
+              : item.hungerValue > 40
+              ? 15
+              : 5)
+        ),
+      };
+    });
 
     return true;
   };
@@ -662,6 +847,88 @@ export default function App() {
     }
   };
 
+  // 10. ACTION: Bet in Gambling Studio (Deduct dollars from Account or Cash + trigger debit notification & debited SMS)
+  const handleBetGamble = async (
+    betAmount: number,
+    payMethod: 'card' | 'cash',
+    gameName: string
+  ): Promise<boolean> => {
+    if (!user) return false;
+    const uid = user.uid;
+
+    if (payMethod === 'card') {
+      if (!bankAccount || !bankAccount.isCardActive || bankAccount.balance < betAmount) {
+        return false;
+      }
+      const newBalance = bankAccount.balance - betAmount;
+      try {
+        await updateDoc(doc(db, 'users', uid, 'bankAccounts', 'main'), {
+          balance: newBalance,
+        });
+
+        const txRef = doc(collection(db, 'users', uid, 'transactions'));
+        await setDoc(txRef, {
+          userId: uid,
+          amount: betAmount,
+          type: 'debit',
+          category: 'Gaming',
+          description: `Casino Wager: ${gameName}`,
+          timestamp: new Date().toISOString(),
+          balanceAfter: newBalance,
+        });
+
+        // Show real-time on-screen debit notification and send Bank SMS as debited!
+        triggerDebitAlert(betAmount, `Casino: ${gameName}`, newBalance);
+        return true;
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${uid}/bankAccounts/main`);
+        return false;
+      }
+    } else {
+      if (cashOnHand < betAmount) return false;
+      setCashOnHand((prev) => prev - betAmount);
+      sounds.playNotification();
+      return true;
+    }
+  };
+
+  // 11. ACTION: Win Cash/Earnings from Gambling Studio (Credit to Account or Wallet + trigger credit notification)
+  const handleWinGamble = async (
+    winAmount: number,
+    payMethod: 'card' | 'cash',
+    gameName: string
+  ): Promise<void> => {
+    if (!user) return;
+    const uid = user.uid;
+
+    if (payMethod === 'card' && bankAccount) {
+      const newBalance = bankAccount.balance + winAmount;
+      try {
+        await updateDoc(doc(db, 'users', uid, 'bankAccounts', 'main'), {
+          balance: newBalance,
+        });
+
+        const txRef = doc(collection(db, 'users', uid, 'transactions'));
+        await setDoc(txRef, {
+          userId: uid,
+          amount: winAmount,
+          type: 'credit',
+          category: 'Gaming',
+          description: `Casino Payout Win: ${gameName}`,
+          timestamp: new Date().toISOString(),
+          balanceAfter: newBalance,
+        });
+
+        triggerCreditAlert(winAmount, `Casino: ${gameName}`, newBalance);
+      } catch (err) {
+        handleFirestoreError(err, OperationType.WRITE, `users/${uid}/bankAccounts/main`);
+      }
+    } else {
+      setCashOnHand((prev) => prev + winAmount);
+      sounds.playCashChime();
+    }
+  };
+
   // Near zone change handler from 3D Canvas
   const handleNearZoneChange = useCallback((zone: InteractiveZone | null, distance: number | null) => {
     setNearestZoneDistance((prev) => (prev === distance ? prev : distance));
@@ -692,6 +959,7 @@ export default function App() {
         weather={weather}
         vitals={vitals}
         gameHour={gameHour}
+        isVomiting={isVomiting}
         onNearZoneChange={handleNearZoneChange}
         onInteract={(zone) => {
           setIsVitalsMinimized(true);
@@ -721,6 +989,8 @@ export default function App() {
         gameHour={gameHour}
         gameDay={gameDay}
         afflictions={afflictions}
+        messages={messages}
+        onSendMessage={(msg) => setMessages((prev) => [msg, ...prev])}
         isOpen={isPhoneOpen}
         onToggle={() => setIsPhoneOpen((prev) => !prev)}
         onSendP2P={handleSendP2P}
@@ -738,7 +1008,7 @@ export default function App() {
         />
       )}
 
-      {/* Interactive Zone Modal (Bank / SIM / Market / Restaurant / Bed / Fountain) */}
+      {/* Interactive Zone Modal (Bank / SIM / Market / Restaurant / Casino / Bed / Fountain) */}
       {modalZone && (
         <InteractionModal
           zone={modalZone}
@@ -751,9 +1021,123 @@ export default function App() {
           onBuyItem={handleBuyItem}
           onSleep={handleSleep}
           onDrinkFountain={handleDrinkFountain}
+          onBetGamble={handleBetGamble}
+          onWinGamble={handleWinGamble}
           characterName={user.displayName || 'Citizen'}
           cashOnHand={cashOnHand}
         />
+      )}
+
+      {/* Real-time Banking Debit / Credit Push Notification Toast */}
+      {debitNotification && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 max-w-md w-full px-4 animate-in slide-in-from-top-3 duration-300 pointer-events-auto">
+          <div className="bg-slate-900/95 border-2 border-amber-500/80 rounded-3xl p-4 shadow-2xl text-white backdrop-blur-md flex items-center justify-between gap-3 shadow-amber-500/10">
+            <div className="flex items-center gap-3">
+              <div
+                className={`w-11 h-11 rounded-2xl flex items-center justify-center text-xl shrink-0 shadow-inner ${
+                  debitNotification.type === 'debit'
+                    ? 'bg-amber-500/20 border border-amber-500/50 text-amber-400'
+                    : 'bg-emerald-500/20 border border-emerald-500/50 text-emerald-400'
+                }`}
+              >
+                {debitNotification.type === 'debit' ? (
+                  <CreditCard className="w-5 h-5 text-amber-400" />
+                ) : (
+                  <DollarSign className="w-6 h-6 text-emerald-400 animate-pulse" />
+                )}
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-wider text-slate-400">
+                    Bank of Metropolis
+                  </span>
+                  <span
+                    className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                      debitNotification.type === 'debit'
+                        ? 'bg-rose-500/20 text-rose-300 border border-rose-500/30'
+                        : 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30'
+                    }`}
+                  >
+                    {debitNotification.type === 'debit' ? 'DEBITED' : 'CREDITED'}
+                  </span>
+                </div>
+                <div className="text-sm font-black text-white mt-0.5 flex items-center gap-2">
+                  <span
+                    className={
+                      debitNotification.type === 'debit'
+                        ? 'text-rose-400 font-mono'
+                        : 'text-emerald-400 font-mono'
+                    }
+                  >
+                    {debitNotification.type === 'debit' ? '-' : '+'}$
+                    {debitNotification.amount.toFixed(2)}
+                  </span>
+                  <span className="text-slate-300 font-normal text-xs truncate max-w-[170px]">
+                    at {debitNotification.merchant}
+                  </span>
+                </div>
+                <div className="text-[11px] text-slate-400 mt-0.5">
+                  Avail. Balance: <strong className="text-white font-mono font-bold">${debitNotification.balanceAfter.toFixed(2)}</strong> • SMS Sent 💬
+                </div>
+              </div>
+            </div>
+
+            <div className="flex flex-col items-end gap-1.5 shrink-0">
+              <button
+                type="button"
+                onClick={() => setIsPhoneOpen(true)}
+                className="px-2.5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-[11px] cursor-pointer shadow transition-all active:scale-95"
+              >
+                Open SMS &rarr;
+              </button>
+              <button
+                type="button"
+                onClick={() => setDebitNotification(null)}
+                className="p-1 text-slate-400 hover:text-white transition-colors cursor-pointer"
+              >
+                <X className="w-3.5 h-3.5" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Active Vomiting / Emesis Alert Toast */}
+      {vomitAlert && (
+        <div className="fixed top-20 left-1/2 -translate-x-1/2 z-40 max-w-md w-full px-4 animate-in slide-in-from-top duration-300">
+          <div className="bg-lime-950/95 border-2 border-lime-500 rounded-3xl p-4 shadow-2xl text-white backdrop-blur-md flex items-start gap-3">
+            <div className="w-10 h-10 rounded-2xl bg-lime-500/20 border border-lime-500/40 flex items-center justify-center text-xl shrink-0 animate-bounce">
+              🤢
+            </div>
+            <div className="flex-1 text-xs">
+              <div className="font-black text-lime-400 text-sm flex items-center justify-between">
+                <span>Overeating Emesis Episode</span>
+                {isVomiting && (
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-lime-500/30 text-lime-300 font-mono animate-pulse">
+                    RETCHING NOW
+                  </span>
+                )}
+              </div>
+              <p className="text-slate-200 mt-1 leading-snug">
+                {vomitAlert}
+              </p>
+              <div className="flex items-center gap-2 mt-2.5">
+                <button
+                  onClick={() => setIsPhoneOpen(true)}
+                  className="px-3 py-1 rounded-xl bg-lime-600 hover:bg-lime-500 text-white font-bold text-[11px] cursor-pointer"
+                >
+                  Check Vitals in Phone &rarr;
+                </button>
+                <button
+                  onClick={() => setVomitAlert(null)}
+                  className="px-3 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] cursor-pointer"
+                >
+                  Dismiss
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Emergency Medical Resuscitation Alert Modal */}

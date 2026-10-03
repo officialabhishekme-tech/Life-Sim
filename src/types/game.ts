@@ -11,6 +11,8 @@ export interface Vitals {
   fatigue: number; // 0 - 100 (100 = fully rested, 0 = exhausted)
   health: number; // 0 - 100
   stamina: number; // 0 - 100 (used for sprinting)
+  weightKg: number; // 48kg (emaciated/lean) to 70kg (healthy normal) to 86kg (heavy)
+  stomachFullness: number; // 0 - 130% (>100 causes severe nausea, >115 triggers vomiting!)
 }
 
 export interface InventoryItem {
@@ -58,7 +60,8 @@ export type TransactionCategory =
   | 'Transfer'
   | 'Banking'
   | 'Groceries'
-  | 'Housing';
+  | 'Housing'
+  | 'Gaming';
 
 export interface TransactionData {
   id: string;
@@ -92,7 +95,9 @@ export type PhysicalProblem =
   | 'severe_dehydration'
   | 'critical_exhaustion'
   | 'heat_stroke'
-  | 'muscle_cramps';
+  | 'muscle_cramps'
+  | 'overeating_vomit'
+  | 'severe_malnutrition_lean';
 
 export interface PhysicalAffliction {
   id: PhysicalProblem;
@@ -115,7 +120,7 @@ export interface SmsMessage {
 export interface InteractiveZone {
   id: string;
   name: string;
-  type: 'bank' | 'sim' | 'market' | 'restaurant' | 'home' | 'fountain' | 'atm';
+  type: 'bank' | 'sim' | 'market' | 'restaurant' | 'home' | 'fountain' | 'atm' | 'casino';
   position: [number, number, number];
   radius: number;
   label: string;

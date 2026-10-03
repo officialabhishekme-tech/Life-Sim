@@ -27,7 +27,13 @@ import {
   Heart,
   Flame,
   Zap,
-  Info
+  Info,
+  Dices,
+  Trophy,
+  Gamepad2,
+  Coins,
+  RotateCw,
+  Crown
 } from 'lucide-react';
 
 interface InteractionModalProps {
@@ -41,6 +47,8 @@ interface InteractionModalProps {
   onBuyItem: (item: Omit<InventoryItem, 'quantity'>, payMethod: 'card' | 'cash') => Promise<boolean>;
   onSleep: (hours: number) => void;
   onDrinkFountain: () => void;
+  onBetGamble?: (betAmount: number, payMethod: 'card' | 'cash', gameName: string) => Promise<boolean>;
+  onWinGamble?: (winAmount: number, payMethod: 'card' | 'cash', gameName: string) => Promise<void>;
   characterName: string;
   cashOnHand: number;
 }
@@ -318,6 +326,45 @@ const STORE_ITEMS: Omit<InventoryItem, 'quantity'>[] = [
   },
 ];
 
+export interface PlayingCard {
+  suit: '♠' | '♥' | '♦' | '♣';
+  rank: string;
+  value: number;
+}
+
+const DECK_SUITS: ('♠' | '♥' | '♦' | '♣')[] = ['♠', '♥', '♦', '♣'];
+const DECK_RANKS = [
+  { rank: 'A', value: 11 },
+  { rank: '2', value: 2 },
+  { rank: '3', value: 3 },
+  { rank: '4', value: 4 },
+  { rank: '5', value: 5 },
+  { rank: '6', value: 6 },
+  { rank: '7', value: 7 },
+  { rank: '8', value: 8 },
+  { rank: '9', value: 9 },
+  { rank: '10', value: 10 },
+  { rank: 'J', value: 10 },
+  { rank: 'Q', value: 10 },
+  { rank: 'K', value: 10 },
+];
+
+function drawRandomCard(): PlayingCard {
+  const suit = DECK_SUITS[Math.floor(Math.random() * DECK_SUITS.length)];
+  const r = DECK_RANKS[Math.floor(Math.random() * DECK_RANKS.length)];
+  return { suit, rank: r.rank, value: r.value };
+}
+
+function calculateHand(cards: PlayingCard[]): number {
+  let sum = cards.reduce((acc, c) => acc + c.value, 0);
+  let aces = cards.filter((c) => c.rank === 'A').length;
+  while (sum > 21 && aces > 0) {
+    sum -= 10;
+    aces -= 1;
+  }
+  return sum;
+}
+
 export const InteractionModal: React.FC<InteractionModalProps> = ({
   zone,
   onClose,
@@ -329,6 +376,8 @@ export const InteractionModal: React.FC<InteractionModalProps> = ({
   onBuyItem,
   onSleep,
   onDrinkFountain,
+  onBetGamble,
+  onWinGamble,
   characterName,
   cashOnHand,
 }) => {
@@ -337,6 +386,30 @@ export const InteractionModal: React.FC<InteractionModalProps> = ({
   const [sleepHours, setSleepHours] = useState(8);
   const [storeFeedback, setStoreFeedback] = useState<string | null>(null);
   const [restaurantCategory, setRestaurantCategory] = useState<'all' | 'breakfast' | 'mains' | 'drinks' | 'desserts'>('all');
+
+  // Casino State
+  const [casinoTab, setCasinoTab] = useState<'slots' | 'blackjack' | 'roulette'>('slots');
+  const [casinoBet, setCasinoBet] = useState(25);
+  const [casinoPayMethod, setCasinoPayMethod] = useState<'card' | 'cash'>('card');
+  const [casinoFeedback, setCasinoFeedback] = useState<string | null>(null);
+
+  // 1. Slots State
+  const [slotReels, setSlotReels] = useState<[string, string, string]>(['7️⃣', '💎', '7️⃣']);
+  const [isSlotSpinning, setIsSlotSpinning] = useState(false);
+  const [lastSlotWin, setLastSlotWin] = useState<number | null>(null);
+
+  // 2. Blackjack State
+  const [bjPhase, setBjPhase] = useState<'betting' | 'player' | 'resolved'>('betting');
+  const [playerCards, setPlayerCards] = useState<PlayingCard[]>([]);
+  const [dealerCards, setDealerCards] = useState<PlayingCard[]>([]);
+  const [bjOutcome, setBjOutcome] = useState<string | null>(null);
+
+  // 3. Roulette State
+  const [rouletteType, setRouletteType] = useState<'red' | 'black' | 'green' | 'even' | 'odd' | 'single'>('red');
+  const [rouletteSingle, setRouletteSingle] = useState(7);
+  const [isRouletteSpinning, setIsRouletteSpinning] = useState(false);
+  const [rouletteResult, setRouletteResult] = useState<{ number: number; color: 'red' | 'black' | 'green' } | null>(null);
+  const [rouletteWinMessage, setRouletteWinMessage] = useState<string | null>(null);
 
   // Phone numbers available for SIM
   const [selectedPhone, setSelectedPhone] = useState('+1 (555) 782-3914');
@@ -381,6 +454,269 @@ export const InteractionModal: React.FC<InteractionModalProps> = ({
       setStoreFeedback(`Purchased ${item.name}! Replenished your vitals.`);
       setTimeout(() => setStoreFeedback(null), 3500);
     }
+  };
+
+  // Casino Gambling Studio Handlers
+  const handleSpinSlots = async () => {
+    if (isSlotSpinning) return;
+    setCasinoFeedback(null);
+    setLastSlotWin(null);
+
+    if (!onBetGamble) return;
+    const ok = await onBetGamble(casinoBet, casinoPayMethod, 'Lucky 7s Cyber Slots');
+    if (!ok) {
+      setCasinoFeedback(
+        casinoPayMethod === 'card'
+          ? 'Card declined or insufficient checking balance for wager.'
+          : 'Insufficient cash in wallet for wager.'
+      );
+      return;
+    }
+
+    setIsSlotSpinning(true);
+    sounds.playSlotSpin();
+
+    const symbols = ['🍒', '🍋', '💎', '🔔', '⭐', '7️⃣'];
+    let ticks = 0;
+    const interval = setInterval(() => {
+      ticks++;
+      setSlotReels([
+        symbols[Math.floor(Math.random() * symbols.length)],
+        symbols[Math.floor(Math.random() * symbols.length)],
+        symbols[Math.floor(Math.random() * symbols.length)],
+      ]);
+      if (ticks >= 14) {
+        clearInterval(interval);
+        const roll = Math.random();
+        let finalReels: [string, string, string];
+        let multiplier = 0;
+
+        // Realistic casino house edge: ~28% win rate, 72% house loss rate
+        if (roll < 0.012) {
+          finalReels = ['7️⃣', '7️⃣', '7️⃣'];
+          multiplier = 50; // Mega 50x (~1.2% chance)
+        } else if (roll < 0.035) {
+          finalReels = ['⭐', '⭐', '⭐'];
+          multiplier = 25; // Super 25x (~2.3% chance)
+        } else if (roll < 0.075) {
+          finalReels = ['🔔', '🔔', '🔔'];
+          multiplier = 15; // 15x (~4% chance)
+        } else if (roll < 0.135) {
+          finalReels = ['💎', '💎', '💎'];
+          multiplier = 10; // 10x (~6% chance)
+        } else if (roll < 0.205) {
+          finalReels = ['🍋', '🍋', '🍋'];
+          multiplier = 5; // 5x (~7% chance)
+        } else if (roll < 0.285) {
+          finalReels = ['🍒', '🍒', symbols[Math.floor(Math.random() * 4) + 1]];
+          multiplier = 2.5; // 2.5x (~8% chance)
+        } else {
+          multiplier = 0;
+          // Exciting loss variations (some near-misses)
+          if (roll < 0.48) {
+            const teaseSym = symbols[Math.floor(Math.random() * symbols.length)];
+            const otherSym = symbols.find((s) => s !== teaseSym) || '🍋';
+            finalReels = [teaseSym, teaseSym, otherSym];
+          } else {
+            const r1 = symbols[Math.floor(Math.random() * symbols.length)];
+            let r2 = symbols[Math.floor(Math.random() * symbols.length)];
+            let r3 = symbols[Math.floor(Math.random() * symbols.length)];
+            if (r1 === r2 && r2 === r3) r3 = r1 === '7️⃣' ? '🍋' : '7️⃣';
+            finalReels = [r1, r2, r3];
+          }
+        }
+
+        setSlotReels(finalReels);
+        setIsSlotSpinning(false);
+
+        if (multiplier > 0) {
+          const payout = casinoBet * multiplier;
+          setLastSlotWin(payout);
+          setCasinoFeedback(`🎉 JACKPOT WIN! Multiplier ${multiplier}x paid out +$${payout.toFixed(2)}!`);
+          confetti({ particleCount: 85, spread: 75, origin: { y: 0.6 } });
+          sounds.playWinFanfare();
+          sounds.playCashChime();
+          if (onWinGamble) onWinGamble(payout, casinoPayMethod, 'Lucky 7s Slots Win');
+        } else {
+          setCasinoFeedback(`House wins! ${finalReels.join(' ')} • No match. You lost your $${casinoBet.toFixed(2)} wager.`);
+          sounds.playNotification();
+        }
+      }
+    }, 80);
+  };
+
+  const handleDealBlackjack = async () => {
+    if (!onBetGamble) return;
+    setCasinoFeedback(null);
+    setBjOutcome(null);
+
+    const ok = await onBetGamble(casinoBet, casinoPayMethod, 'Royale Blackjack');
+    if (!ok) {
+      setCasinoFeedback(
+        casinoPayMethod === 'card'
+          ? 'Card declined or insufficient balance for wager.'
+          : 'Insufficient cash in wallet for wager.'
+      );
+      return;
+    }
+
+    sounds.playNotification();
+
+    const p1 = drawRandomCard();
+    const p2 = drawRandomCard();
+    const d1 = drawRandomCard();
+    const d2 = drawRandomCard();
+
+    setPlayerCards([p1, p2]);
+    setDealerCards([d1, d2]);
+
+    const pScore = calculateHand([p1, p2]);
+    const dScore = calculateHand([d1, d2]);
+
+    // Check for Dealer Natural Blackjack
+    if (dScore === 21) {
+      setBjPhase('resolved');
+      if (pScore === 21) {
+        setBjOutcome(`🤝 BOTH HIT BLACKJACK 21! Push tie. Wager of $${casinoBet.toFixed(2)} refunded.`);
+        sounds.playNotification();
+        if (onWinGamble) onWinGamble(casinoBet, casinoPayMethod, 'Blackjack Push Refund');
+      } else {
+        setBjOutcome(`💥 DEALER NATURAL BLACKJACK 21! Dealer holds [${d1.rank}${d1.suit}, ${d2.rank}${d2.suit}]. House takes $${casinoBet.toFixed(2)}.`);
+        sounds.playNotification();
+      }
+      return;
+    }
+
+    if (pScore === 21) {
+      const payout = casinoBet * 2.5;
+      setBjPhase('resolved');
+      setBjOutcome(`🔥 NATURAL BLACKJACK 21! Paid 3:2 (+$${payout.toFixed(2)})`);
+      confetti({ particleCount: 80, spread: 70, origin: { y: 0.6 } });
+      sounds.playWinFanfare();
+      sounds.playCashChime();
+      if (onWinGamble) onWinGamble(payout, casinoPayMethod, 'Blackjack Natural 21');
+      return;
+    }
+
+    setBjPhase('player');
+  };
+
+  const handleBlackjackHit = () => {
+    if (bjPhase !== 'player') return;
+    const newCard = drawRandomCard();
+    const nextPlayer = [...playerCards, newCard];
+    setPlayerCards(nextPlayer);
+    sounds.playNotification();
+
+    const score = calculateHand(nextPlayer);
+    if (score > 21) {
+      setBjPhase('resolved');
+      setBjOutcome(`💥 BUST! Your score is ${score} (exceeded 21). House takes your $${casinoBet.toFixed(2)} wager.`);
+      sounds.playNotification();
+    } else if (score === 21) {
+      handleBlackjackStand(nextPlayer);
+    }
+  };
+
+  const handleBlackjackStand = async (overridePlayer?: PlayingCard[]) => {
+    setBjPhase('resolved');
+    const finalPlayer = overridePlayer || playerCards;
+    const pScore = calculateHand(finalPlayer);
+
+    let currentDealer = [...dealerCards];
+    while (calculateHand(currentDealer) < 17) {
+      currentDealer.push(drawRandomCard());
+    }
+    setDealerCards(currentDealer);
+    const dScore = calculateHand(currentDealer);
+
+    if (dScore > 21) {
+      const payout = casinoBet * 2;
+      setBjOutcome(`🎉 DEALER BUSTS (${dScore})! You won +$${payout.toFixed(2)}!`);
+      confetti({ particleCount: 75, spread: 65, origin: { y: 0.6 } });
+      sounds.playWinFanfare();
+      sounds.playCashChime();
+      if (onWinGamble) onWinGamble(payout, casinoPayMethod, 'Royale Blackjack Win');
+    } else if (pScore > dScore) {
+      const payout = casinoBet * 2;
+      setBjOutcome(`🎉 YOU WIN! Your ${pScore} beats Dealer's ${dScore} (+$${payout.toFixed(2)})!`);
+      confetti({ particleCount: 75, spread: 65, origin: { y: 0.6 } });
+      sounds.playWinFanfare();
+      sounds.playCashChime();
+      if (onWinGamble) onWinGamble(payout, casinoPayMethod, 'Royale Blackjack Win');
+    } else if (pScore === dScore) {
+      setBjOutcome(`🤝 PUSH TIE (${pScore} - ${dScore})! Wager of $${casinoBet.toFixed(2)} refunded.`);
+      sounds.playNotification();
+      if (onWinGamble) onWinGamble(casinoBet, casinoPayMethod, 'Blackjack Push Refund');
+    } else {
+      setBjOutcome(`Dealer wins with ${dScore} vs your ${pScore}. The House takes your $${casinoBet.toFixed(2)} wager.`);
+      sounds.playNotification();
+    }
+  };
+
+  const handleSpinRoulette = async () => {
+    if (isRouletteSpinning) return;
+    setCasinoFeedback(null);
+    setRouletteWinMessage(null);
+
+    if (!onBetGamble) return;
+    const ok = await onBetGamble(casinoBet, casinoPayMethod, `Neon Roulette (${rouletteType})`);
+    if (!ok) {
+      setCasinoFeedback(
+        casinoPayMethod === 'card'
+          ? 'Card declined or insufficient balance for wager.'
+          : 'Insufficient cash in wallet for wager.'
+      );
+      return;
+    }
+
+    setIsRouletteSpinning(true);
+    sounds.playSlotSpin();
+
+    setTimeout(() => {
+      const winningNumber = Math.floor(Math.random() * 37);
+      const redNumbers = [1, 3, 5, 7, 9, 12, 14, 16, 18, 19, 21, 23, 25, 27, 30, 32, 34, 36];
+      const winningColor: 'red' | 'black' | 'green' =
+        winningNumber === 0 ? 'green' : redNumbers.includes(winningNumber) ? 'red' : 'black';
+
+      setRouletteResult({ number: winningNumber, color: winningColor });
+      setIsRouletteSpinning(false);
+
+      let won = false;
+      let multiplier = 0;
+
+      if (rouletteType === 'red' && winningColor === 'red') {
+        won = true;
+        multiplier = 2;
+      } else if (rouletteType === 'black' && winningColor === 'black') {
+        won = true;
+        multiplier = 2;
+      } else if (rouletteType === 'green' && winningNumber === 0) {
+        won = true;
+        multiplier = 36;
+      } else if (rouletteType === 'even' && winningNumber > 0 && winningNumber % 2 === 0) {
+        won = true;
+        multiplier = 2;
+      } else if (rouletteType === 'odd' && winningNumber % 2 === 1) {
+        won = true;
+        multiplier = 2;
+      } else if (rouletteType === 'single' && winningNumber === rouletteSingle) {
+        won = true;
+        multiplier = 36;
+      }
+
+      if (won) {
+        const payout = casinoBet * multiplier;
+        setRouletteWinMessage(`🎉 ROULETTE HIT! Landed on ${winningNumber} (${winningColor.toUpperCase()})! Payout: +$${payout.toFixed(2)} (${multiplier}x)`);
+        confetti({ particleCount: 90, spread: 80, origin: { y: 0.6 } });
+        sounds.playWinFanfare();
+        sounds.playCashChime();
+        if (onWinGamble) onWinGamble(payout, casinoPayMethod, 'Neon Roulette Win');
+      } else {
+        setRouletteWinMessage(`Wheel stopped on ${winningNumber} (${winningColor.toUpperCase()}). You bet on ${rouletteType.toUpperCase()}. The House takes your $${casinoBet.toFixed(2)} wager.`);
+        sounds.playNotification();
+      }
+    }, 1600);
   };
 
   return (
@@ -912,6 +1248,452 @@ export const InteractionModal: React.FC<InteractionModalProps> = ({
               <Droplets className="w-5 h-5" />
               <span>Drink Free Fresh Water (+35 Hydration)</span>
             </button>
+          </div>
+        )}
+
+        {/* CASINO & GAMBLING STUDIO ZONE */}
+        {zone.type === 'casino' && (
+          <div className="space-y-4 overflow-y-auto pr-1">
+            {/* Header */}
+            <div className="flex items-center gap-3.5">
+              <div className="p-3.5 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-400">
+                <Crown className="w-8 h-8" />
+              </div>
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-amber-500/15 border border-amber-500/30 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
+                  <Sparkles className="w-3 h-3 text-amber-400" /> High Roller VIP Gaming Lounge
+                </div>
+                <h2 className="text-2xl font-black text-white mt-0.5">Metropolis Royale Casino</h2>
+                <p className="text-xs text-slate-400">
+                  Wager dollars on Cyber Slots, Blackjack, or Roulette. Win massive instant cash payouts!
+                </p>
+              </div>
+            </div>
+
+            {/* Balances & Payment Mode Banner */}
+            <div className="p-3.5 rounded-2xl bg-slate-950 border border-slate-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+              <div className="flex items-center gap-4">
+                <div>
+                  <div className="text-[10px] text-slate-400">Card Balance</div>
+                  <div className="font-bold font-mono text-emerald-400 flex items-center gap-1">
+                    <CreditCard className="w-3.5 h-3.5" />
+                    <span>${bankAccount ? bankAccount.balance.toFixed(2) : '0.00'}</span>
+                  </div>
+                </div>
+                <div className="w-px h-6 bg-slate-800" />
+                <div>
+                  <div className="text-[10px] text-slate-400">Cash in Wallet</div>
+                  <div className="font-bold font-mono text-amber-300 flex items-center gap-1">
+                    <DollarSign className="w-3.5 h-3.5" />
+                    <span>${cashOnHand.toFixed(2)}</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Pay method selector */}
+              <div className="flex items-center gap-1 bg-slate-900 p-1 rounded-xl border border-slate-800">
+                <button
+                  type="button"
+                  onClick={() => setCasinoPayMethod('card')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                    casinoPayMethod === 'card'
+                      ? 'bg-indigo-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  💳 Visa Card
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCasinoPayMethod('cash')}
+                  className={`px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all cursor-pointer ${
+                    casinoPayMethod === 'cash'
+                      ? 'bg-amber-600 text-white shadow'
+                      : 'text-slate-400 hover:text-white'
+                  }`}
+                >
+                  💵 Cash Wallet
+                </button>
+              </div>
+            </div>
+
+            {/* Feedback message banner */}
+            {casinoFeedback && (
+              <div
+                className={`p-3 rounded-2xl border text-xs font-bold text-center animate-in fade-in flex items-center justify-center gap-2 ${
+                  casinoFeedback.includes('WIN') || casinoFeedback.includes('NATURAL')
+                    ? 'bg-emerald-500/20 border-emerald-500/40 text-emerald-300'
+                    : 'bg-rose-500/20 border-rose-500/40 text-rose-300'
+                }`}
+              >
+                <span>{casinoFeedback}</span>
+              </div>
+            )}
+
+            {/* Wager Chip Selector */}
+            <div className="p-3.5 rounded-2xl bg-slate-950/70 border border-slate-800 space-y-2">
+              <div className="flex items-center justify-between text-xs">
+                <span className="font-bold text-slate-300 flex items-center gap-1.5">
+                  <Coins className="w-4 h-4 text-amber-400" /> Current Wager:
+                </span>
+                <span className="font-mono font-black text-amber-400 text-sm">
+                  ${casinoBet.toFixed(2)}
+                </span>
+              </div>
+              <div className="flex flex-wrap items-center gap-1.5">
+                {[10, 25, 50, 100, 250, 500].map((amt) => (
+                  <button
+                    key={amt}
+                    type="button"
+                    onClick={() => setCasinoBet(amt)}
+                    className={`px-3 py-1.5 rounded-xl font-mono text-xs font-bold transition-all cursor-pointer ${
+                      casinoBet === amt
+                        ? 'bg-amber-500 text-slate-950 scale-105 shadow-md font-black'
+                        : 'bg-slate-900 border border-slate-800 text-slate-300 hover:border-amber-500/50'
+                    }`}
+                  >
+                    ${amt}
+                  </button>
+                ))}
+                <button
+                  type="button"
+                  onClick={() => {
+                    const maxAvail = casinoPayMethod === 'card' ? (bankAccount?.balance || 0) : cashOnHand;
+                    if (maxAvail > 0) setCasinoBet(Math.min(1000, Math.floor(maxAvail)));
+                  }}
+                  className="px-3 py-1.5 rounded-xl bg-purple-600/30 hover:bg-purple-600/50 border border-purple-500/50 text-purple-300 font-mono text-xs font-bold cursor-pointer"
+                >
+                  Max Bet
+                </button>
+              </div>
+            </div>
+
+            {/* Game Tabs */}
+            <div className="flex items-center gap-1.5 p-1 rounded-2xl bg-slate-950 border border-slate-800 text-xs">
+              <button
+                type="button"
+                onClick={() => setCasinoTab('slots')}
+                className={`flex-1 py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  casinoTab === 'slots'
+                    ? 'bg-gradient-to-r from-amber-600 to-yellow-500 text-slate-950 shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🎰</span>
+                <span>Lucky 7s Slots</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCasinoTab('blackjack')}
+                className={`flex-1 py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  casinoTab === 'blackjack'
+                    ? 'bg-gradient-to-r from-indigo-600 to-blue-500 text-white shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🃏</span>
+                <span>Royale Blackjack</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCasinoTab('roulette')}
+                className={`flex-1 py-2 rounded-xl font-bold flex items-center justify-center gap-1.5 transition-all cursor-pointer ${
+                  casinoTab === 'roulette'
+                    ? 'bg-gradient-to-r from-emerald-600 to-teal-500 text-white shadow-md font-black'
+                    : 'text-slate-400 hover:text-white'
+                }`}
+              >
+                <span>🎡</span>
+                <span>Neon Roulette</span>
+              </button>
+            </div>
+
+            {/* GAME 1: LUCKY 7S CYBER SLOTS */}
+            {casinoTab === 'slots' && (
+              <div className="space-y-4 p-5 rounded-3xl bg-gradient-to-b from-slate-950 to-slate-900 border border-amber-500/30 text-center shadow-xl">
+                <div className="text-[11px] font-bold text-amber-400 uppercase tracking-widest flex items-center justify-center gap-1.5">
+                  <Sparkles className="w-3.5 h-3.5" /> High Stakes 3-Reel Slots • 50x Jackpot
+                </div>
+
+                {/* 3 Slot Reels Display */}
+                <div className="flex items-center justify-center gap-3 py-3">
+                  {slotReels.map((symbol, idx) => (
+                    <div
+                      key={idx}
+                      className={`w-24 h-28 rounded-2xl bg-gradient-to-b from-slate-900 via-slate-950 to-slate-900 border-2 border-amber-500/60 shadow-inner flex items-center justify-center text-5xl transition-all select-none ${
+                        isSlotSpinning ? 'blur-[1px] animate-pulse scale-95 border-amber-400' : 'scale-100'
+                      }`}
+                    >
+                      {symbol}
+                    </div>
+                  ))}
+                </div>
+
+                {/* Paytable quick guide */}
+                <div className="grid grid-cols-3 gap-2 p-2.5 rounded-2xl bg-slate-950/80 border border-slate-800 text-[10px] text-slate-400">
+                  <div>7️⃣ 7️⃣ 7️⃣ = <strong className="text-amber-400 font-bold">50x</strong></div>
+                  <div>⭐ ⭐ ⭐ = <strong className="text-yellow-300 font-bold">25x</strong></div>
+                  <div>🔔 🔔 🔔 = <strong className="text-cyan-400 font-bold">15x</strong></div>
+                  <div>💎 💎 💎 = <strong className="text-sky-300 font-bold">10x</strong></div>
+                  <div>🍋 🍋 🍋 = <strong className="text-lime-400 font-bold">5x</strong></div>
+                  <div>🍒 🍒 = <strong className="text-rose-400 font-bold">2.5x</strong></div>
+                </div>
+
+                {/* Spin Button */}
+                <button
+                  type="button"
+                  disabled={isSlotSpinning}
+                  onClick={handleSpinSlots}
+                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-amber-500 via-yellow-400 to-amber-500 hover:from-amber-400 hover:to-yellow-300 text-slate-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-amber-500/25 transition-all cursor-pointer active:scale-95 disabled:opacity-50"
+                >
+                  <RotateCw className={`w-5 h-5 ${isSlotSpinning ? 'animate-spin' : ''}`} />
+                  <span>{isSlotSpinning ? 'Spinning Reels...' : `Spin Reels ($${casinoBet.toFixed(2)})`}</span>
+                </button>
+              </div>
+            )}
+
+            {/* GAME 2: ROYALE BLACKJACK */}
+            {casinoTab === 'blackjack' && (
+              <div className="space-y-4 p-5 rounded-3xl bg-gradient-to-b from-slate-950 to-emerald-950/30 border border-emerald-500/30 text-center shadow-xl">
+                <div className="text-[11px] font-bold text-emerald-400 uppercase tracking-widest">
+                  Royale Blackjack 21 • Dealer Stands on 17
+                </div>
+
+                {/* Dealer Area */}
+                <div className="space-y-2 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-left">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-slate-400">Dealer Hand</span>
+                    {bjPhase === 'resolved' && (
+                      <span className="font-mono font-bold text-emerald-400">
+                        Score: {calculateHand(dealerCards)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 min-h-[52px]">
+                    {dealerCards.length === 0 ? (
+                      <span className="text-[11px] text-slate-500 italic">Cards waiting to be dealt...</span>
+                    ) : (
+                      dealerCards.map((c, idx) => {
+                        const isHidden = idx === 1 && bjPhase === 'player';
+                        const isRed = c.suit === '♥' || c.suit === '♦';
+                        return (
+                          <div
+                            key={idx}
+                            className={`w-12 h-16 rounded-xl border flex flex-col items-center justify-center font-mono font-bold text-xs shadow-md ${
+                              isHidden
+                                ? 'bg-indigo-900 border-indigo-700 text-indigo-300'
+                                : `bg-white border-slate-200 ${isRed ? 'text-rose-600' : 'text-slate-950'}`
+                            }`}
+                          >
+                            {isHidden ? (
+                              <span>🂠</span>
+                            ) : (
+                              <>
+                                <span className="text-[10px] leading-none">{c.rank}</span>
+                                <span className="text-base leading-none">{c.suit}</span>
+                              </>
+                            )}
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {/* Player Area */}
+                <div className="space-y-2 p-3 rounded-2xl bg-slate-950/80 border border-slate-800 text-left">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="font-bold text-white">Your Hand</span>
+                    {playerCards.length > 0 && (
+                      <span className="font-mono font-bold text-amber-400">
+                        Score: {calculateHand(playerCards)}
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-2 min-h-[52px]">
+                    {playerCards.length === 0 ? (
+                      <span className="text-[11px] text-slate-500 italic">Press Deal Cards to start hand</span>
+                    ) : (
+                      playerCards.map((c, idx) => {
+                        const isRed = c.suit === '♥' || c.suit === '♦';
+                        return (
+                          <div
+                            key={idx}
+                            className={`w-12 h-16 rounded-xl bg-white border border-slate-200 flex flex-col items-center justify-center font-mono font-bold text-xs shadow-md ${
+                              isRed ? 'text-rose-600' : 'text-slate-950'
+                            }`}
+                          >
+                            <span className="text-[10px] leading-none">{c.rank}</span>
+                            <span className="text-base leading-none">{c.suit}</span>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                </div>
+
+                {bjOutcome && (
+                  <div className="p-3 rounded-2xl bg-indigo-500/20 border border-indigo-500/40 text-xs font-bold text-indigo-300">
+                    {bjOutcome}
+                  </div>
+                )}
+
+                {/* Blackjack Controls */}
+                {bjPhase === 'betting' || bjPhase === 'resolved' ? (
+                  <button
+                    type="button"
+                    onClick={handleDealBlackjack}
+                    className="w-full py-3.5 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-black text-sm flex items-center justify-center gap-2 shadow-lg shadow-indigo-600/30 cursor-pointer active:scale-95 transition-all"
+                  >
+                    <Gamepad2 className="w-5 h-5" />
+                    <span>Deal Hand (${casinoBet.toFixed(2)})</span>
+                  </button>
+                ) : (
+                  <div className="flex items-center gap-3">
+                    <button
+                      type="button"
+                      onClick={handleBlackjackHit}
+                      className="flex-1 py-3.5 rounded-2xl bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-sm cursor-pointer shadow-lg active:scale-95 transition-all"
+                    >
+                      Hit (+ Card)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleBlackjackStand()}
+                      className="flex-1 py-3.5 rounded-2xl bg-amber-600 hover:bg-amber-500 text-white font-bold text-sm cursor-pointer shadow-lg active:scale-95 transition-all"
+                    >
+                      Stand (Hold)
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* GAME 3: NEON ROULETTE */}
+            {casinoTab === 'roulette' && (
+              <div className="space-y-4 p-5 rounded-3xl bg-gradient-to-b from-slate-950 to-slate-900 border border-teal-500/30 text-center shadow-xl">
+                <div className="text-[11px] font-bold text-teal-400 uppercase tracking-widest">
+                  European Neon Roulette • Single Zero 36x Payout
+                </div>
+
+                {/* Roulette Wheel Landing Display */}
+                <div className="py-4">
+                  <div
+                    className={`w-28 h-28 mx-auto rounded-full border-4 flex flex-col items-center justify-center shadow-2xl transition-all ${
+                      isRouletteSpinning
+                        ? 'border-yellow-400 animate-spin bg-slate-900'
+                        : rouletteResult
+                        ? rouletteResult.color === 'green'
+                          ? 'border-emerald-500 bg-emerald-950 text-emerald-300'
+                          : rouletteResult.color === 'red'
+                          ? 'border-rose-500 bg-rose-950 text-rose-300'
+                          : 'border-slate-500 bg-slate-950 text-slate-200'
+                        : 'border-slate-700 bg-slate-900 text-slate-400'
+                    }`}
+                  >
+                    {isRouletteSpinning ? (
+                      <span className="text-2xl animate-pulse">🎡</span>
+                    ) : (
+                      <>
+                        <span className="text-3xl font-black font-mono">
+                          {rouletteResult !== null ? rouletteResult.number : '🎡'}
+                        </span>
+                        {rouletteResult && (
+                          <span className="text-[9px] uppercase font-bold tracking-wider">
+                            {rouletteResult.color}
+                          </span>
+                        )}
+                      </>
+                    )}
+                  </div>
+                </div>
+
+                {rouletteWinMessage && (
+                  <div className="p-3 rounded-2xl bg-teal-500/20 border border-teal-500/40 text-xs font-bold text-teal-300">
+                    {rouletteWinMessage}
+                  </div>
+                )}
+
+                {/* Roulette Bet Targets */}
+                <div className="space-y-2 text-left">
+                  <div className="text-xs font-bold text-slate-300">Select Wager Spot:</div>
+                  <div className="grid grid-cols-3 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setRouletteType('red')}
+                      className={`p-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                        rouletteType === 'red'
+                          ? 'bg-rose-600 text-white border-white scale-105 shadow-md'
+                          : 'bg-rose-950/40 border-rose-800 text-rose-300 hover:bg-rose-900/50'
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-rose-500" />
+                      <span>Red (2x)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRouletteType('black')}
+                      className={`p-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                        rouletteType === 'black'
+                          ? 'bg-slate-800 text-white border-white scale-105 shadow-md'
+                          : 'bg-slate-950 border-slate-800 text-slate-300 hover:bg-slate-900'
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-slate-400" />
+                      <span>Black (2x)</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRouletteType('green')}
+                      className={`p-2.5 rounded-xl font-bold flex items-center justify-center gap-1.5 border transition-all cursor-pointer ${
+                        rouletteType === 'green'
+                          ? 'bg-emerald-600 text-white border-white scale-105 shadow-md'
+                          : 'bg-emerald-950/40 border-emerald-800 text-emerald-300 hover:bg-emerald-900/50'
+                      }`}
+                    >
+                      <span className="w-2.5 h-2.5 rounded-full bg-emerald-400" />
+                      <span>Zero 0 (36x)</span>
+                    </button>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => setRouletteType('even')}
+                      className={`p-2 rounded-xl font-bold border transition-all cursor-pointer ${
+                        rouletteType === 'even'
+                          ? 'bg-indigo-600 text-white border-white'
+                          : 'bg-slate-950 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      Even (2x)
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setRouletteType('odd')}
+                      className={`p-2 rounded-xl font-bold border transition-all cursor-pointer ${
+                        rouletteType === 'odd'
+                          ? 'bg-indigo-600 text-white border-white'
+                          : 'bg-slate-950 border-slate-800 text-slate-300'
+                      }`}
+                    >
+                      Odd (2x)
+                    </button>
+                  </div>
+                </div>
+
+                {/* Spin Roulette Button */}
+                <button
+                  type="button"
+                  disabled={isRouletteSpinning}
+                  onClick={handleSpinRoulette}
+                  className="w-full py-4 rounded-2xl bg-gradient-to-r from-teal-500 to-emerald-500 hover:from-teal-400 hover:to-emerald-400 text-slate-950 font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 shadow-xl shadow-teal-500/25 cursor-pointer active:scale-95 disabled:opacity-50 transition-all"
+                >
+                  <RotateCw className={`w-5 h-5 ${isRouletteSpinning ? 'animate-spin' : ''}`} />
+                  <span>{isRouletteSpinning ? 'Wheel Spinning...' : `Spin Roulette ($${casinoBet.toFixed(2)})`}</span>
+                </button>
+              </div>
+            )}
           </div>
         )}
       </div>

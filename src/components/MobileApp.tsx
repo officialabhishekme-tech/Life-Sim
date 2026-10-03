@@ -51,7 +51,8 @@ import {
   User,
   ArrowLeft,
   AlertCircle,
-  Volume2
+  Volume2,
+  Scale
 } from 'lucide-react';
 
 interface MobileAppProps {
@@ -62,6 +63,8 @@ interface MobileAppProps {
   gameHour: number;
   gameDay: number;
   afflictions: PhysicalAffliction[];
+  messages?: SmsMessage[];
+  onSendMessage?: (msg: SmsMessage) => void;
   isOpen: boolean;
   onToggle: () => void;
   onSendP2P: (recipient: string, amount: number, note: string) => Promise<boolean>;
@@ -74,7 +77,7 @@ interface MobileAppProps {
 type AppScreen = 'homescreen' | 'bank' | 'vitals' | 'phone' | 'messages' | 'bistro';
 type BankSubTab = 'home' | 'analytics' | 'p2p' | 'cards';
 
-const DEFAULT_SMS: SmsMessage[] = [
+export const DEFAULT_SMS: SmsMessage[] = [
   {
     id: 'm1',
     senderName: 'Metro Federal Bank',
@@ -156,6 +159,7 @@ const CATEGORY_COLORS: Record<TransactionCategory, { bg: string; text: string; h
   Banking: { bg: 'bg-emerald-500/10', text: 'text-emerald-400', hex: '#10b981' },
   Groceries: { bg: 'bg-lime-500/10', text: 'text-lime-400', hex: '#84cc16' },
   Housing: { bg: 'bg-blue-500/10', text: 'text-blue-400', hex: '#3b82f6' },
+  Gaming: { bg: 'bg-yellow-500/10', text: 'text-yellow-400', hex: '#eab308' },
 };
 
 export interface ActiveCallInfo {
@@ -173,6 +177,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
   gameHour,
   gameDay,
   afflictions = [],
+  messages: propMessages,
+  onSendMessage,
   isOpen,
   onToggle,
   onSendP2P,
@@ -201,7 +207,8 @@ export const MobileApp: React.FC<MobileAppProps> = ({
   }, [activeCall]);
 
   // SMS state
-  const [messages, setMessages] = useState<SmsMessage[]>(DEFAULT_SMS);
+  const [internalMessages, setInternalMessages] = useState<SmsMessage[]>(DEFAULT_SMS);
+  const messages = propMessages || internalMessages;
   const [activeThread, setActiveThread] = useState<SmsMessage | null>(null);
   const [newSmsText, setNewSmsText] = useState('');
 
@@ -221,6 +228,7 @@ export const MobileApp: React.FC<MobileAppProps> = ({
       Transfer: 0,
       Groceries: 0,
       Housing: 0,
+      Gaming: 0,
     };
     let totalSpent = 0;
 
@@ -357,7 +365,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({
       isRead: true,
       avatarBg: 'bg-indigo-600',
     };
-    setMessages((prev) => [reply, ...prev]);
+    if (onSendMessage) {
+      onSendMessage(reply);
+    } else {
+      setInternalMessages((prev) => [reply, ...prev]);
+    }
     setNewSmsText('');
   };
 
@@ -516,9 +528,11 @@ export const MobileApp: React.FC<MobileAppProps> = ({
                       <div className="w-full h-full rounded-[14px] bg-slate-950 flex items-center justify-center text-emerald-400">
                         <MessageSquare className="w-7 h-7" />
                       </div>
-                      <span className="absolute -top-1 -right-1 w-4 h-4 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center border border-slate-950">
-                        2
-                      </span>
+                      {messages.filter((m) => !m.isRead).length > 0 && (
+                        <span className="absolute -top-1 -right-1 min-w-4 h-4 px-1 rounded-full bg-rose-500 text-white font-mono text-[9px] font-bold flex items-center justify-center border border-slate-950 animate-pulse">
+                          {messages.filter((m) => !m.isRead).length}
+                        </span>
+                      )}
                     </div>
                     <span className="text-[10px] font-bold text-white tracking-tight text-center">
                       Messages
@@ -745,6 +759,102 @@ export const MobileApp: React.FC<MobileAppProps> = ({
                   >
                     <Utensils className="w-3.5 h-3.5" /> Eat Food / Meal (+35 Hunger)
                   </button>
+                )}
+              </div>
+
+              {/* Dynamic Body Physique & Weight */}
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-3">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <Scale className="w-4 h-4 text-violet-400" /> Body Mass & Physique
+                  </span>
+                  <span className="font-mono font-bold text-violet-300">
+                    {(vitals.weightKg !== undefined ? vitals.weightKg : (vitals.hunger < 35 ? 51.5 : 70.0)).toFixed(1)} kg
+                  </span>
+                </div>
+
+                {/* Physique Status Tag */}
+                {(() => {
+                  const w = vitals.weightKg !== undefined ? vitals.weightKg : (vitals.hunger < 35 ? 51.5 : 70.0);
+                  const isLean = w < 58 || vitals.hunger < 35;
+                  const isHealthy = w >= 58 && w <= 76 && vitals.hunger >= 35;
+                  return (
+                    <div className="space-y-2">
+                      <div className="flex items-center justify-between text-[11px]">
+                        <span className="text-slate-400">Current Physique:</span>
+                        <span
+                          className={`font-bold px-2.5 py-0.5 rounded-full ${
+                            isLean
+                              ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40'
+                              : isHealthy
+                              ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/40'
+                              : 'bg-amber-500/20 text-amber-300 border border-amber-500/40'
+                          }`}
+                        >
+                          {isLean ? '🦴 Skinny & Lean (Underfed)' : isHealthy ? '💪 Athletic & Fit (70kg)' : 'Heavy Mass'}
+                        </span>
+                      </div>
+
+                      {/* Weight Spectrum Bar */}
+                      <div className="space-y-1">
+                        <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden relative">
+                          <div
+                            className={`h-full transition-all duration-300 ${
+                              isLean ? 'bg-rose-500' : isHealthy ? 'bg-emerald-500' : 'bg-amber-500'
+                            }`}
+                            style={{
+                              width: `${Math.min(100, Math.max(0, ((w - 48) / (88 - 48)) * 100))}%`,
+                            }}
+                          />
+                        </div>
+                        <div className="flex justify-between text-[9px] text-slate-500 font-mono">
+                          <span>48kg (Lean)</span>
+                          <span>70kg (Normal)</span>
+                          <span>88kg (Heavy)</span>
+                        </div>
+                      </div>
+
+                      <p className="text-[10px] text-slate-400 leading-tight">
+                        {isLean
+                          ? '⚠️ Low caloric intake! Not eating proper meals causes body tissue loss, making your 3D avatar visibly lean and skinny. Eat meals at Bella Vista Bistro to rebuild mass.'
+                          : 'Maintaining healthy body mass. 3D avatar reflects athletic physique.'}
+                      </p>
+                    </div>
+                  );
+                })()}
+              </div>
+
+              {/* Stomach Fullness & Vomiting Safety Meter */}
+              <div className="p-4 rounded-3xl bg-slate-900 border border-slate-800 space-y-2.5">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-white flex items-center gap-1.5">
+                    <AlertCircle className="w-4 h-4 text-amber-400" /> Stomach Fullness & Capacity
+                  </span>
+                  <span className="font-mono font-bold text-amber-300">
+                    {Math.round(vitals.stomachFullness !== undefined ? vitals.stomachFullness : vitals.hunger)}% Capacity
+                  </span>
+                </div>
+                <div className="w-full h-2 rounded-full bg-slate-950 overflow-hidden">
+                  <div
+                    className={`h-full transition-all duration-300 ${
+                      (vitals.stomachFullness || vitals.hunger) > 100
+                        ? 'bg-rose-500'
+                        : (vitals.stomachFullness || vitals.hunger) > 85
+                        ? 'bg-amber-500'
+                        : 'bg-emerald-500'
+                    }`}
+                    style={{
+                      width: `${Math.min(100, (vitals.stomachFullness || vitals.hunger))}%`,
+                    }}
+                  />
+                </div>
+                {(vitals.stomachFullness || vitals.hunger) > 95 && (
+                  <div className="p-2 rounded-xl bg-rose-500/15 border border-rose-500/30 text-rose-300 text-[10px] flex items-center gap-2">
+                    <span className="text-base">🤢</span>
+                    <span>
+                      <strong>Warning:</strong> Stomach near max capacity. Overeating beyond 115% triggers violent vomiting and rapid fluid loss!
+                    </span>
+                  </div>
                 )}
               </div>
 
